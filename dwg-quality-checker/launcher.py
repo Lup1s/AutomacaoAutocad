@@ -16,6 +16,7 @@ from pathlib import Path
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
+import yaml
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -459,6 +460,331 @@ class BatchWindow(ctk.CTkToplevel):
             messagebox.showinfo("Não encontrado", "Relatório não encontrado.", parent=self)
 
 
+# ── Config Editor Window ──────────────────────────────────────────────────────
+
+class ConfigEditorWindow(ctk.CTkToplevel):
+    """Editor visual para config.yaml — sem precisar editar o arquivo manualmente."""
+
+    _CONFIG_FILE = _BASE_DIR / "config.yaml"
+
+    def __init__(self, parent) -> None:
+        super().__init__(parent)
+        self.title("⚙️  Editor de Configurações")
+        self.geometry("600x640")
+        self.minsize(560, 580)
+        self.configure(fg_color=C["bg"])
+        self.grab_set()
+        self._cfg = self._load()
+        self._build()
+        self.lift()
+        self.focus()
+
+    # ── Load / Save ───────────────────────────────────────────────────────────
+
+    def _load(self) -> dict:
+        try:
+            with open(self._CONFIG_FILE, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
+        except Exception as exc:
+            logging.warning("ConfigEditor: não carregou config.yaml: %s", exc)
+            return {}
+
+    def _collect(self) -> None:
+        """Lê widgets e atualiza self._cfg."""
+        self._cfg.setdefault("layers", {})
+        self._cfg["layers"]["required"] = self._req_layers[:]
+        self._cfg["layers"]["naming_convention"] = self._naming_var.get().strip()
+
+        self._cfg.setdefault("text", {})
+        for key, attr in (("min_height", "_min_h_var"), ("max_height", "_max_h_var")):
+            try:
+                self._cfg["text"][key] = float(getattr(self, attr).get().replace(",", "."))
+            except ValueError:
+                pass
+
+        self._cfg.setdefault("drawing", {})
+        for key, var in self._drawing_vars.items():
+            self._cfg["drawing"][key] = bool(var.get())
+
+    def _save(self) -> None:
+        try:
+            self._collect()
+            with open(self._CONFIG_FILE, "w", encoding="utf-8") as f:
+                yaml.dump(self._cfg, f, allow_unicode=True,
+                          default_flow_style=False, sort_keys=False)
+            messagebox.showinfo("Salvo", "✅ Configurações salvas com sucesso!", parent=self)
+            self.destroy()
+        except Exception as exc:
+            logging.error("ConfigEditor: erro ao salvar: %s", exc)
+            messagebox.showerror("Erro", f"Não foi possível salvar:\n{exc}", parent=self)
+
+    # ── Build UI ──────────────────────────────────────────────────────────────
+
+    def _build(self) -> None:
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+
+        # ── Header ────────────────────────────────────────────────────────────
+        hdr = ctk.CTkFrame(self, fg_color=C["surface"], corner_radius=0, height=48)
+        hdr.grid(row=0, column=0, sticky="ew")
+        hdr.grid_propagate(False)
+        hdr.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(hdr, text="⚙️", font=ctk.CTkFont(size=22)
+        ).grid(row=0, column=0, padx=(16, 8), pady=8)
+        ctk.CTkLabel(hdr, text="Editor de Configurações",
+                     font=ctk.CTkFont(size=14, weight="bold"), text_color=C["text"]
+        ).grid(row=0, column=1, sticky="w")
+        ctk.CTkLabel(hdr, text="config.yaml",
+                     font=ctk.CTkFont(size=10), text_color=C["muted"]
+        ).grid(row=0, column=2, padx=14)
+
+        # ── Tabs ──────────────────────────────────────────────────────────────
+        tabs = ctk.CTkTabview(
+            self,
+            fg_color=C["surface"],
+            segmented_button_fg_color=C["surface2"],
+            segmented_button_selected_color=C["accent"],
+            segmented_button_selected_hover_color=C["accent"],
+            segmented_button_unselected_color=C["surface2"],
+            segmented_button_unselected_hover_color=C["border"],
+        )
+        tabs.grid(row=1, column=0, padx=12, pady=(8, 4), sticky="nsew")
+        tabs.add("📐  Camadas")
+        tabs.add("✏️  Textos")
+        tabs.add("🔲  Desenho")
+        self._build_layers_tab(tabs.tab("📐  Camadas"))
+        self._build_text_tab(tabs.tab("✏️  Textos"))
+        self._build_drawing_tab(tabs.tab("🔲  Desenho"))
+
+        # ── Footer ────────────────────────────────────────────────────────────
+        ftr = ctk.CTkFrame(self, fg_color="transparent")
+        ftr.grid(row=2, column=0, padx=14, pady=(4, 14), sticky="ew")
+        ftr.grid_columnconfigure(0, weight=1)
+        ctk.CTkButton(
+            ftr, text="💾  Salvar", width=120, height=36, corner_radius=8,
+            font=ctk.CTkFont(size=12, weight="bold"), command=self._save,
+        ).grid(row=0, column=1, padx=(0, 8))
+        ctk.CTkButton(
+            ftr, text="Cancelar", width=95, height=36, corner_radius=8,
+            fg_color=C["surface2"], hover_color=C["border"],
+            font=ctk.CTkFont(size=12), text_color=C["muted"],
+            command=self.destroy,
+        ).grid(row=0, column=2)
+
+    # ── Tab: Camadas ──────────────────────────────────────────────────────────
+
+    def _build_layers_tab(self, parent) -> None:
+        parent.grid_columnconfigure(0, weight=1)
+        layers_cfg = self._cfg.get("layers", {})
+        self._req_layers: list[str] = list(layers_cfg.get("required") or [])
+
+        # --- Required layers ---
+        ctk.CTkLabel(parent, text="Layers obrigatórias",
+                     font=ctk.CTkFont(size=12, weight="bold"), text_color=C["text"]
+        ).grid(row=0, column=0, sticky="w", pady=(12, 2))
+        ctk.CTkLabel(parent,
+                     text="O desenho DEVE conter todas estas layers (vazio = não verificar)",
+                     font=ctk.CTkFont(size=10), text_color=C["muted"]
+        ).grid(row=1, column=0, sticky="w", pady=(0, 6))
+
+        lf = ctk.CTkFrame(parent, fg_color=C["surface2"], corner_radius=8)
+        lf.grid(row=2, column=0, sticky="ew", pady=(0, 8))
+        lf.grid_columnconfigure(0, weight=1)
+
+        self._layers_lb = tk.Listbox(
+            lf, bg=C["surface2"], fg=C["text"],
+            selectbackground=C["border"], selectforeground=C["text"],
+            borderwidth=0, highlightthickness=0,
+            font=("Segoe UI", 10), height=5,
+        )
+        self._layers_lb.grid(row=0, column=0, sticky="ew", padx=8, pady=(6, 4))
+        for layer in self._req_layers:
+            self._layers_lb.insert("end", layer)
+
+        add_row = ctk.CTkFrame(lf, fg_color="transparent")
+        add_row.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
+        add_row.grid_columnconfigure(0, weight=1)
+
+        self._new_layer_var = ctk.StringVar()
+        new_entry = ctk.CTkEntry(
+            add_row, textvariable=self._new_layer_var,
+            placeholder_text="Nome da layer (ex: TEXTO, COTA)...",
+            height=30, corner_radius=6, font=ctk.CTkFont(size=11),
+            fg_color=C["surface"], border_color=C["border"],
+        )
+        new_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        new_entry.bind("<Return>", lambda _: self._add_layer())
+
+        ctk.CTkButton(add_row, text="＋ Adicionar", width=100, height=30,
+                      corner_radius=6, font=ctk.CTkFont(size=11),
+                      command=self._add_layer,
+        ).grid(row=0, column=1, padx=(0, 6))
+        ctk.CTkButton(add_row, text="🗑 Remover", width=90, height=30,
+                      corner_radius=6, font=ctk.CTkFont(size=11),
+                      fg_color=C["surface"], hover_color=C["border"],
+                      text_color=C["muted"], command=self._remove_layer,
+        ).grid(row=0, column=2)
+
+        # --- Naming convention ---
+        ctk.CTkLabel(parent, text="Padrão de nomenclatura (Regex)",
+                     font=ctk.CTkFont(size=12, weight="bold"), text_color=C["text"]
+        ).grid(row=3, column=0, sticky="w", pady=(12, 2))
+        ctk.CTkLabel(parent,
+                     text='Ex: "^[A-Z]{2,4}-[A-Z0-9_-]+$"  →  ARQ-PAREDE, EST-VIGA\n'
+                          '(vazio = desabilitar verificação de nomenclatura)',
+                     font=ctk.CTkFont(size=10), text_color=C["muted"], justify="left",
+        ).grid(row=4, column=0, sticky="w", pady=(0, 6))
+
+        self._naming_var = ctk.StringVar(
+            value=layers_cfg.get("naming_convention") or "")
+        ctk.CTkEntry(parent, textvariable=self._naming_var,
+                     placeholder_text="Regex (vazio = desabilitado)...",
+                     height=34, corner_radius=8, font=ctk.CTkFont(size=11),
+                     fg_color=C["surface2"], border_color=C["border"],
+        ).grid(row=5, column=0, sticky="ew")
+
+    def _add_layer(self) -> None:
+        name = self._new_layer_var.get().strip().upper()
+        if name and name not in self._req_layers:
+            self._req_layers.append(name)
+            self._layers_lb.insert("end", name)
+            self._new_layer_var.set("")
+
+    def _remove_layer(self) -> None:
+        sel = self._layers_lb.curselection()
+        if sel:
+            self._layers_lb.delete(sel[0])
+            del self._req_layers[sel[0]]
+
+    # ── Tab: Textos ───────────────────────────────────────────────────────────
+
+    def _build_text_tab(self, parent) -> None:
+        parent.grid_columnconfigure(0, weight=1)
+        text_cfg = self._cfg.get("text", {})
+
+        ctk.CTkLabel(parent, text="Alturas de texto permitidas",
+                     font=ctk.CTkFont(size=12, weight="bold"), text_color=C["text"]
+        ).grid(row=0, column=0, columnspan=4, sticky="w", pady=(12, 8))
+
+        # --- Reference table ---
+        ref = ctk.CTkFrame(parent, fg_color=C["surface2"], corner_radius=8)
+        ref.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(0, 20))
+
+        headers = [("Tipo de projeto", 230), ("Mín", 70), ("Máx", 70)]
+        for col, (h, w) in enumerate(headers):
+            ctk.CTkLabel(ref, text=h, font=ctk.CTkFont(size=9, weight="bold"),
+                         text_color=C["muted"], width=w, anchor="w"
+            ).grid(row=0, column=col, padx=(10, 4), pady=(6, 2), sticky="w")
+
+        for i, (tipo, mn, mx) in enumerate([
+            ("Topografia / UTM (m)",          "0.50", "20.0"),
+            ("Arquitetura 1:50 (mm)",          "1.50", "10.0"),
+            ("Estrutural / Civil (m)",         "0.10",  "5.0"),
+            ("Mecânico / Industrial (mm)",    "2.00", "15.0"),
+            ("Levantamento topográfico (m)",  "0.03", "50.0"),
+        ]):
+            fg = C["surface"] if i % 2 else C["surface2"]
+            for col, (val, clr, w) in enumerate([
+                (tipo, C["muted"],   230),
+                (mn,   C["success"], 70),
+                (mx,   C["error"],   70),
+            ]):
+                ctk.CTkLabel(ref, text=val, font=ctk.CTkFont(size=10),
+                             text_color=clr, width=w, anchor="w",
+                ).grid(row=i + 1, column=col, padx=(10, 4), pady=3, sticky="w")
+
+        # --- Min / Max entries ---
+        for col_off, (label, key, attr, clr) in enumerate([
+            ("Altura mínima", "min_height", "_min_h_var", C["success"]),
+            ("Altura máxima", "max_height", "_max_h_var", C["error"]),
+        ]):
+            c = col_off * 2
+            ctk.CTkLabel(parent, text=label,
+                         font=ctk.CTkFont(size=12, weight="bold"), text_color=clr,
+            ).grid(row=2, column=c, sticky="w", padx=(0 if c == 0 else 20, 0))
+            var = ctk.StringVar(value=str(text_cfg.get(key, "")))
+            setattr(self, attr, var)
+            ctk.CTkEntry(parent, textvariable=var,
+                         width=130, height=40, corner_radius=8,
+                         font=ctk.CTkFont(size=16),
+                         fg_color=C["surface2"], border_color=clr,
+            ).grid(row=3, column=c, sticky="w", padx=(0 if c == 0 else 20, 0), pady=(4, 0))
+
+        ctk.CTkLabel(parent,
+                     text="Unidades devem ser consistentes com o arquivo DXF (metros, mm, etc.)",
+                     font=ctk.CTkFont(size=10), text_color=C["muted"],
+        ).grid(row=4, column=0, columnspan=4, sticky="w", pady=(12, 0))
+
+    # ── Tab: Desenho ──────────────────────────────────────────────────────────
+
+    def _build_drawing_tab(self, parent) -> None:
+        parent.grid_columnconfigure(0, weight=1)
+        drawing_cfg = self._cfg.get("drawing", {})
+        self._drawing_vars: dict[str, ctk.BooleanVar] = {}
+
+        RULES = [
+            ("check_entities_on_layer_0",
+             "Entidades na Layer 0",
+             "Objetos desenhados diretamente na layer 0 (má prática de organização)"),
+            ("check_unused_blocks",
+             "Blocos não utilizados",
+             "Blocos definidos no arquivo mas nunca inseridos no model space"),
+            ("check_empty_layers",
+             "Layers vazias",
+             "Layers existentes sem nenhuma entidade associada"),
+            ("check_frozen_layers",
+             "Layers congeladas com dados",
+             "Layers congeladas que ainda possuem entidades (potencial confusão)"),
+            ("check_off_layers",
+             "Layers desligadas com dados",
+             "Layers desligadas (off) que ainda possuem entidades"),
+            ("check_color_bylayer",
+             "Cor explícita (não ByLayer)",
+             "Entidades com cor definida diretamente, fora do padrão ByLayer"),
+            ("check_linetype_bylayer",
+             "Tipo de linha explícito",
+             "Entidades com tipo de linha definido diretamente, fora do padrão ByLayer"),
+            ("check_duplicates",
+             "Entidades duplicadas",
+             "Detecta entidades sobrepostas com mesmo tipo, layer e coordenadas"),
+            ("check_xrefs",
+             "Referências externas (XREF)",
+             "Verifica se XREFs estão carregadas e acessíveis no disco"),
+        ]
+
+        scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent", corner_radius=0)
+        scroll.pack(fill="both", expand=True, pady=(6, 0))
+        scroll.grid_columnconfigure(0, weight=1)
+
+        for i, (key, label, desc) in enumerate(RULES):
+            val = drawing_cfg.get(key, True)
+            var = ctk.BooleanVar(value=bool(val))
+            self._drawing_vars[key] = var
+
+            row_f = ctk.CTkFrame(
+                scroll,
+                fg_color=C["surface2"] if i % 2 == 0 else C["surface"],
+                corner_radius=8,
+            )
+            row_f.pack(fill="x", pady=3)
+            row_f.grid_columnconfigure(1, weight=1)
+
+            ctk.CTkSwitch(
+                row_f, variable=var, text="",
+                width=44, button_color=C["accent"], progress_color=C["accent"],
+                fg_color=C["border"],
+            ).grid(row=0, column=0, rowspan=2, padx=(14, 10), pady=10)
+
+            ctk.CTkLabel(row_f, text=label,
+                         font=ctk.CTkFont(size=11, weight="bold"),
+                         text_color=C["text"], anchor="w",
+            ).grid(row=0, column=1, sticky="w", pady=(8, 0))
+            ctk.CTkLabel(row_f, text=desc,
+                         font=ctk.CTkFont(size=10), text_color=C["muted"],
+                         anchor="w", wraplength=380,
+            ).grid(row=1, column=1, sticky="w", pady=(0, 8))
+
+
 # ── Main Application ──────────────────────────────────────────────────────────
 
 class App(ctk.CTk):
@@ -507,11 +833,18 @@ class App(ctk.CTk):
         ).grid(row=0, column=2, padx=(0, 6))
 
         ctk.CTkButton(
+            h, text="⚙️  Config", width=90, height=28, corner_radius=8,
+            fg_color=C["surface2"], hover_color=C["border"],
+            font=ctk.CTkFont(size=11), text_color=C["muted"],
+            command=self._open_config,
+        ).grid(row=0, column=3, padx=(0, 6))
+
+        ctk.CTkButton(
             h, text="ℹ️  Sobre", width=85, height=28, corner_radius=8,
             fg_color=C["surface2"], hover_color=C["border"],
             font=ctk.CTkFont(size=11), text_color=C["muted"],
             command=self._open_about,
-        ).grid(row=0, column=3, padx=(0, 14))
+        ).grid(row=0, column=4, padx=(0, 14))
 
     # ── Controls ──────────────────────────────────────────────────────────────
 
@@ -532,7 +865,7 @@ class App(ctk.CTk):
         self.file_var = ctk.StringVar()
         self._file_entry = ctk.CTkEntry(
             fr, textvariable=self.file_var,
-            placeholder_text="Selecione um arquivo DXF ou DWG...",
+            placeholder_text="Selecione um arquivo .DXF  (suporte a .DWG em breve)...",
             height=32, corner_radius=8,
             fg_color=C["surface2"], border_color=C["border"],
             font=ctk.CTkFont(size=11),
@@ -771,13 +1104,15 @@ class App(ctk.CTk):
             command=win.destroy,
         ).pack(pady=(16, 0))
 
+    def _open_config(self) -> None:
+        ConfigEditorWindow(self)
+
     # ── Logic ─────────────────────────────────────────────────────────────────
 
     def _browse(self) -> None:
         p = filedialog.askopenfilename(
-            title="Selecionar arquivo DXF/DWG",
-            filetypes=[("CAD", "*.dxf *.dwg"), ("DXF", "*.dxf"),
-                       ("DWG", "*.dwg"), ("Todos", "*.*")],
+            title="Selecionar arquivo DXF",
+            filetypes=[("DXF — Drawing Exchange Format", "*.dxf"), ("Todos os arquivos", "*.*")],
         )
         if p:
             self.file_var.set(p)
@@ -787,11 +1122,21 @@ class App(ctk.CTk):
         fp = self.file_var.get().strip()
         if not fp or not Path(fp).exists():
             messagebox.showwarning("Arquivo não selecionado",
-                                   "Selecione um arquivo DXF/DWG válido.")
+                                   "Selecione um arquivo .DXF válido.")
             return
-        if Path(fp).suffix.lower() not in (".dxf", ".dwg"):
+        ext = Path(fp).suffix.lower()
+        if ext == ".dwg":
+            messagebox.showwarning(
+                ".DWG ainda não suportado",
+                "Arquivos .DWG ainda não são suportados nesta versão.\n\n"
+                "Converta o arquivo para .DXF no AutoCAD:\n"
+                "  Arquivo → Salvar Como → formato AutoCAD DXF (*.dxf)\n\n"
+                "O suporte a .DWG estará disponível em uma versão futura."
+            )
+            return
+        if ext != ".dxf":
             messagebox.showwarning("Formato inválido",
-                                   "Apenas arquivos .DXF e .DWG são suportados.")
+                                   "Apenas arquivos .DXF são suportados nesta versão.")
             return
         size_mb = Path(fp).stat().st_size / (1024 * 1024)
         if size_mb > 100 and not messagebox.askyesno(
