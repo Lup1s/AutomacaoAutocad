@@ -10,6 +10,8 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import hashlib
+
 import ezdxf
 import yaml
 
@@ -46,6 +48,13 @@ _CONFIG_DEFAULTS: dict = {
         "check_linetype_bylayer":    True,
         "check_duplicates":          True,
         "check_xrefs":               True,
+        # Novas regras v2.5
+        "check_title_block":         True,
+        "check_viewport":            True,
+        "check_mtext_overflow":      True,
+        "check_external_fonts":      True,
+        "check_line_weights":        True,
+        "check_plot_styles":         True,
     },
 }
 
@@ -254,6 +263,12 @@ class DXFChecker:
         # ── Metadados do arquivo ───────────────────────────────────────────
         file_size_mb = round(path.stat().st_size / (1024 * 1024), 2)
 
+        # ── SHA-256 (assinatura do arquivo) ────────────────────────────────
+        try:
+            sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+        except Exception:
+            sha256 = ""
+
         # ── Abrir DXF — com fallback de recuperação para arquivos corrompidos
         pre_issues: list[Issue] = []
         try:
@@ -314,6 +329,15 @@ class DXFChecker:
         issue_handles = {iss.handle for iss in issues if iss.handle}
         geo_result    = _extract_geometry(doc, issue_handles=issue_handles)
 
+        # ── Aplicar overrides de severidade (config [rules][severity_overrides]) ─
+        sev_overrides: dict = self.config.get("rules", {}).get("severity_overrides", {})
+        if sev_overrides:
+            for iss in issues:
+                if iss.rule in sev_overrides:
+                    try:
+                        iss.severity = Severity(sev_overrides[iss.rule])
+                    except ValueError:
+                        pass
         return {
             "file":             path.name,
             "file_path":        str(path.resolve()),
@@ -330,4 +354,5 @@ class DXFChecker:
             "passed":   all(i.severity != Severity.ERROR for i in issues),
             "geometry": geo_result["shapes"],
             "geo_bbox": geo_result["bbox"],
+            "sha256":   sha256,
         }

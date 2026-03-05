@@ -1,0 +1,1 @@
+2026-03-05 17:55:49  WARNING   DnD: erro ao registrar targets: '_tkinter.tkapp' object has no attribute 'drop_target_register'

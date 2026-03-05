@@ -569,6 +569,286 @@ def check_xrefs(doc: ezdxf.document.Drawing, config: dict) -> List[Issue]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  Constantes para as novas regras v2.5
+# ─────────────────────────────────────────────────────────────────────────────
+
+_STANDARD_FONTS: frozenset = frozenset({
+    # Fontes SHX nativas do AutoCAD
+    "STANDARD", "TXT", "SIMPLEX", "COMPLEX", "ITALIC",
+    "ROMANS", "ROMAND", "ROMANC", "ROMANTIC",
+    "SCRIPTS", "SCRIPTC", "GREEKS",
+    "GOTHICE", "GOTHICG", "GOTHICI",
+    "MONOTXT", "SYASTRO", "SYMAP", "SYMATH", "SYMETEO", "SYMUSIC",
+    "ISOCPEUR", "ISOCP", "ISOCT", "ISOEEUR", "ISOEE",
+    # Fontes TrueType amplamente disponíveis
+    "ARIAL", "ARIAL NARROW", "TIMES NEW ROMAN", "COURIER NEW",
+    "CALIBRI", "TAHOMA", "VERDANA", "SEGOE UI",
+})
+
+_TITLE_KEYWORDS: frozenset = frozenset({
+    "TITULO", "TITLE", "CARIMBO", "SELO", "TB",
+    "TITLEBLOCK", "TITLE_BLOCK", "CABECALHO",
+    "REVISION_BLOCK", "DRAWING_INFO", "LEGENDA",
+})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Novas Regras v2.5
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def check_title_block(doc: ezdxf.document.Drawing, config: dict) -> List[Issue]:
+    """Verifica se existe um bloco de carimbo (INSERT com nome padrão)."""
+    if not config.get("drawing", {}).get("check_title_block", True):
+        return []
+
+    msp   = doc.modelspace()
+    found = [
+        e for e in msp
+        if e.dxftype() == "INSERT"
+        and any(kw in e.dxf.name.upper() for kw in _TITLE_KEYWORDS)
+    ]
+    if found:
+        return []
+    return [Issue(
+        rule="TITLE_BLOCK_MISSING",
+        severity=Severity.WARNING,
+        message="Bloco de carimbo não encontrado no model space",
+        entity_type="BLOCK",
+        details="Nomes aceitos: TITULO, TITLE, CARIMBO, SELO, TITLEBLOCK, LEGENDA…",
+    )]
+
+
+def check_viewport(doc: ezdxf.document.Drawing, config: dict) -> List[Issue]:
+    """Detecta VIEWPORTs sem escala definida em layouts de paper space."""
+    if not config.get("drawing", {}).get("check_viewport", True):
+        return []
+
+    issues: List[Issue] = []
+    try:
+        for layout in doc.layouts:
+            if layout.is_modelspace:
+                continue
+            for entity in layout:
+                if entity.dxftype() != "VIEWPORT":
+                    continue
+                view_h  = entity.dxf.get("view_height", 0.0)
+                paper_h = entity.dxf.get("height",      0.0)
+                if view_h <= 0:
+                    issues.append(Issue(
+                        rule="VIEWPORT_NO_SCALE",
+                        severity=Severity.WARNING,
+                        message=(
+                            f"Viewport no layout '{layout.name}' sem escala "
+                            "definida (view_height = 0)"
+                        ),
+                        entity_type="VIEWPORT",
+                        handle=entity.dxf.get("handle", ""),
+                    ))
+                elif paper_h > 0:
+                    scale = view_h / paper_h
+                    if not (0.0001 <= scale <= 10000):
+                        issues.append(Issue(
+                            rule="VIEWPORT_SCALE_UNUSUAL",
+                            severity=Severity.WARNING,
+                            message=(
+                                f"Viewport com escala incomum (1:{scale:.0f}) "
+                                f"no layout '{layout.name}'"
+                            ),
+                            entity_type="VIEWPORT",
+                            handle=entity.dxf.get("handle", ""),
+                            details=(
+                                f"view_height={view_h:.3f}  "
+                                f"paper_height={paper_h:.3f}"
+                            ),
+                        ))
+    except Exception:
+        pass
+    return issues
+
+
+def check_mtext_overflow(doc: ezdxf.document.Drawing, config: dict) -> List[Issue]:
+    """Detecta MTEXT cujo conteúdo pode transbordar o boundary box definido."""
+    if not config.get("drawing", {}).get("check_mtext_overflow", True):
+        return []
+
+    MAX    = 20
+    issues: List[Issue] = []
+    total  = 0
+
+    for entity in doc.modelspace():
+        if entity.dxftype() != "MTEXT":
+            continue
+        try:
+            width   = entity.dxf.get("width",          0.0)
+            bound_h = entity.dxf.get("defined_height",  0.0)
+            if width <= 0 or bound_h <= 0:
+                continue   # sem caixa definida — não avaliável
+            char_h = entity.dxf.get("char_height", 2.5) or 2.5
+            raw    = entity.plain_mtext() if hasattr(entity, "plain_mtext") else ""
+            if not raw:
+                raw = entity.dxf.get("text", "")
+            lines  = max(1, raw.count("\\P") + raw.count("\n") + 1)
+            est_h  = lines * char_h * 1.5
+            if est_h > bound_h * 1.2:
+                total += 1
+                if len(issues) < MAX:
+                    issues.append(Issue(
+                        rule="MTEXT_OVERFLOW",
+                        severity=Severity.WARNING,
+                        message=(
+                            f"MTEXT com possível transbordamento "
+                            f"(~{lines} linha(s), boundary={bound_h:.1f})"
+                        ),
+                        entity_type="MTEXT",
+                        layer=entity.dxf.layer,
+                        handle=entity.dxf.get("handle", ""),
+                        location=_coord(entity),
+                        details=(
+                            f"char_height={char_h:.2f}  "
+                            f"linhas_est={lines}  "
+                            f"boundary_h={bound_h:.2f}"
+                        ),
+                    ))
+        except Exception:
+            pass
+
+    if total > MAX:
+        issues.append(Issue(
+            rule="MTEXT_OVERFLOW",
+            severity=Severity.WARNING,
+            message=(
+                f"… e mais {total - MAX} MTEXT(s) com possível "
+                f"transbordamento (total: {total})"
+            ),
+            entity_type="MULTIPLE",
+        ))
+    return issues
+
+
+def check_external_fonts(doc: ezdxf.document.Drawing, config: dict) -> List[Issue]:
+    """Detecta estilos de texto com fontes não-padrão (SHX incomuns / TTF proprietárias)."""
+    if not config.get("drawing", {}).get("check_external_fonts", True):
+        return []
+
+    issues: List[Issue] = []
+    for style in doc.styles:
+        name = style.dxf.name
+        if name.upper() in ("STANDARD", "ANNOTATIVE", ""):
+            continue
+        raw_font = style.dxf.get("font", "")
+        if not raw_font:
+            continue
+        font_clean = (
+            raw_font.upper()
+            .replace(".SHX", "")
+            .replace(".TTF", "")
+            .replace(".OTF", "")
+            .strip()
+        )
+        if font_clean not in _STANDARD_FONTS:
+            issues.append(Issue(
+                rule="EXTERNAL_FONT",
+                severity=Severity.INFO,
+                message=(
+                    f"Estilo '{name}' usa fonte não-padrão '{raw_font}' "
+                    "— garanta que o destinatário possui esta fonte"
+                ),
+                entity_type="STYLE",
+                details=f"Fonte: {raw_font}",
+            ))
+    return issues
+
+
+def check_line_weights(doc: ezdxf.document.Drawing, config: dict) -> List[Issue]:
+    """Detecta entidades com espessura de linha explícita (não BYLAYER)."""
+    if not config.get("drawing", {}).get("check_line_weights", True):
+        return []
+
+    BYLAYER = -1
+    BYBLOCK = -2
+    SKIP    = {"VIEWPORT", "ATTDEF", "DIMENSION", "LEADER", "MULTILEADER",
+               "HATCH", "WIPEOUT", "XLINE"}
+    MAX     = 25
+    issues: List[Issue] = []
+    total   = 0
+
+    for entity in doc.modelspace():
+        if entity.dxftype() in SKIP:
+            continue
+        if not entity.dxf.hasattr("lineweight"):
+            continue
+        lw = entity.dxf.lineweight
+        if lw in (BYLAYER, BYBLOCK, 0):
+            continue
+        total += 1
+        if len(issues) < MAX:
+            lw_label = f"{lw / 100:.2f}mm" if lw > 0 else str(lw)
+            issues.append(Issue(
+                rule="LINEWEIGHT_NOT_BYLAYER",
+                severity=Severity.WARNING,
+                message=(
+                    f"'{entity.dxftype()}' com espessura de linha explícita "
+                    f"({lw_label}) na layer '{entity.dxf.layer}'"
+                ),
+                entity_type=entity.dxftype(),
+                layer=entity.dxf.layer,
+                handle=entity.dxf.get("handle", ""),
+                location=_coord(entity),
+                details=f"Lineweight code: {lw}",
+            ))
+
+    if total > MAX:
+        issues.append(Issue(
+            rule="LINEWEIGHT_NOT_BYLAYER",
+            severity=Severity.WARNING,
+            message=(
+                f"… e mais {total - MAX} entidade(s) com espessura explícita "
+                f"(total: {total})"
+            ),
+            entity_type="MULTIPLE",
+        ))
+    return issues
+
+
+def check_plot_styles(doc: ezdxf.document.Drawing, config: dict) -> List[Issue]:
+    """Verifica configurações de estilo de plotagem (CTB/STB) no header do DXF."""
+    if not config.get("drawing", {}).get("check_plot_styles", True):
+        return []
+
+    issues: List[Issue] = []
+    try:
+        header     = doc.header
+        stylesheet = header.get("$STYLESHEET", "")
+        mode       = header.get("$PSTYLEMODE", None)
+
+        if mode is None:
+            return []   # versão DXF anterior sem suporte a plot styles
+
+        if isinstance(stylesheet, str):
+            name = stylesheet.strip()
+            if not name:
+                issues.append(Issue(
+                    rule="PLOT_STYLE_NOT_SET",
+                    severity=Severity.INFO,
+                    message="Nenhum estilo de plotagem CTB/STB definido no header",
+                    entity_type="HEADER",
+                    details=f"$PSTYLEMODE={mode}  $STYLESHEET=(vazio)",
+                ))
+            elif not name.upper().endswith((".CTB", ".STB")):
+                issues.append(Issue(
+                    rule="PLOT_STYLE_INVALID",
+                    severity=Severity.INFO,
+                    message=f"Estilo de plotagem com extensão incomum: '{name}'",
+                    entity_type="HEADER",
+                    details=f"$STYLESHEET={name}",
+                ))
+    except Exception:
+        pass
+    return issues
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  Registro de Regras
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -588,4 +868,11 @@ def get_all_rules() -> List[Callable]:
         check_linetype_not_bylayer,
         check_duplicate_entities,
         check_xrefs,
+        # ── Novas regras v2.5 ────────────────────────────────────────────────
+        check_title_block,
+        check_viewport,
+        check_mtext_overflow,
+        check_external_fonts,
+        check_line_weights,
+        check_plot_styles,
     ]
