@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+
+# Reports gerados
+*.html
+*.csv
+
+# DXF de exemplo gerado
+samples/sample_with_issues.dxf
+
+# OS
+.DS_Store
+Thumbs.db

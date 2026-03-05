@@ -1,0 +1,62 @@
+# DWG Quality Checker — Configuração de Regras
+# Edite este arquivo para personalizar as verificações do seu padrão de escritório.
+# Todos os valores booleanos (true/false) habilitam/desabilitam cada verificação.
+
+layers:
+  # Layers que DEVEM existir no desenho (vazio = não verificar)
+  required: []
+  # Exemplos:
+  #   - "TEXTO"
+  #   - "COTA"
+  #   - "HACHURA"
+
+  # Convenção de nomenclatura em Regex (vazio = desabilitar verificação)
+  # Exemplo: "^[A-Z]{2,4}-[A-Z0-9_-]+$"  → padrões como "ARQ-PAREDE"
+  naming_convention: ""
+
+text:
+  # Altura mínima e máxima permitida para textos (em unidades do desenho).
+  # Ajuste conforme a UNIDADE e ESCALA do projeto:
+  #
+  #  ┌─────────────────────────────────────────┬────────┬────────┐
+  #  │ Tipo de projeto                         │  min   │  max   │
+  #  ├─────────────────────────────────────────┼────────┼────────┤
+  #  │ Topografia / Georreferenciamento (m)    │  0.50  │  20.0  │
+  #  │ Arquitetura 1:50 (mm)                   │  1.50  │  10.0  │
+  #  │ Estrutural / Civil (m, desenhos grandes)│  0.10  │  5.0   │
+  #  │ Mecânico / Industrial (mm)              │  2.00  │  15.0  │
+  #  │ Levantamento topográfico (m, UTM)       │  0.03  │  50.0  │
+  #  └─────────────────────────────────────────┴────────┴────────┘
+  min_height: 0.03
+  max_height: 50.0
+
+drawing:
+  # Alertar sobre entidades desenhadas diretamente na layer "0" (má prática)
+  check_entities_on_layer_0: true
+  # Alertar sobre blocos definidos mas não inseridos no model space
+  check_unused_blocks: true
+  # Alertar sobre layers sem nenhuma entidade no model space
+  check_empty_layers: true
+  # Alertar sobre layers congeladas que ainda possuem entidades
+  check_frozen_layers: true
+  # Alertar sobre layers desligadas (off) que ainda possuem entidades
+  check_off_layers: true
+
+  # ── Padrão ByLayer ─────────────────────────────────────────────────────────
+  # Entidades com cor explícita (não ByLayer) — viola padrão de escritório.
+  # Desabilite se o seu padrão admite cores explícitas em certas entidades.
+  check_color_bylayer: true
+
+  # Entidades com tipo de linha explícito (não ByLayer) — viola padrão.
+  # Desabilite se linhas especiais (CENTER, HIDDEN etc.) são permitidas direto.
+  check_linetype_bylayer: true
+
+  # ── Duplicatas ──────────────────────────────────────────────────────────────
+  # Detecta entidades sobrepostas/duplicadas (mesmo tipo, layer e coordenadas).
+  # Pode gerar falsos positivos em blocos com inserção múltipla intencional.
+  check_duplicates: true
+
+  # ── Referências externas (XREF) ─────────────────────────────────────────────
+  # Verifica se XREFs estão carregadas e acessíveis no disco.
+  # Desabilite se o desenho é distribuído sem as XREFs associadas.
+  check_xrefs: true

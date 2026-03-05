@@ -1,0 +1,46 @@
+[
+  {
+    "timestamp": "05/03/2026 14:26:45",
+    "file": "LUIZ.dxf",
+    "file_path": "C:\\Users\\Luizq\\OneDrive\\Desktop\\LUIZ.dxf",
+    "passed": false,
+    "errors": 1,
+    "warnings": 27,
+    "infos": 2,
+    "total": 30,
+    "html_path": "C:\\Users\\Luizq\\OneDrive\\Desktop\\LUIZ_report.html"
+  },
+  {
+    "timestamp": "05/03/2026 14:16:04",
+    "file": "LUIZ.dxf",
+    "file_path": "C:\\Users\\Luizq\\OneDrive\\Desktop\\LUIZ.dxf",
+    "passed": false,
+    "errors": 1,
+    "warnings": 27,
+    "infos": 2,
+    "total": 30,
+    "html_path": "C:\\Users\\Luizq\\OneDrive\\Desktop\\LUIZ_report.html"
+  },
+  {
+    "timestamp": "05/03/2026 14:12:03",
+    "file": "LUIZ.dxf",
+    "file_path": "C:\\Users\\Luizq\\OneDrive\\Desktop\\LUIZ.dxf",
+    "passed": false,
+    "errors": 1,
+    "warnings": 27,
+    "infos": 2,
+    "total": 30,
+    "html_path": "C:\\Users\\Luizq\\OneDrive\\Desktop\\LUIZ_report.html"
+  },
+  {
+    "timestamp": "05/03/2026 13:46:05",
+    "file": "LUIZ.dxf",
+    "file_path": "C:\\Users\\Luizq\\OneDrive\\Desktop\\LUIZ.dxf",
+    "passed": false,
+    "errors": 1,
+    "warnings": 27,
+    "infos": 2,
+    "total": 30,
+    "html_path": "C:\\Users\\Luizq\\OneDrive\\Desktop\\LUIZ_report.html"
+  }
+]
