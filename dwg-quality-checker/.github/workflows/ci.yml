@@ -32,16 +32,24 @@ jobs:
       - name: Generate sample DXF with issues
         run: python samples/generate_sample.py
 
+      - name: Check release metadata consistency
+        run: python build/sync_version_metadata.py --check
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -p "test_*.py" -v
+
       - name: Run checker (console output)
         run: python main.py samples/sample_with_issues.dxf
 
       - name: Run checker (generate all reports)
-        run: python main.py samples/sample_with_issues.dxf --output all --output-file samples/report
+        run: python main.py samples/sample_with_issues.dxf --output all --out-dir samples
 
       - name: Upload reports as artifacts
         uses: actions/upload-artifact@v4
         with:
           name: quality-reports-py${{ matrix.python-version }}
           path: |
-            samples/report.html
-            samples/report.csv
+            samples/sample_with_issues_report.html
+            samples/sample_with_issues_report.csv
+            samples/sample_with_issues_report.pdf
+            samples/sample_with_issues_report.xlsx

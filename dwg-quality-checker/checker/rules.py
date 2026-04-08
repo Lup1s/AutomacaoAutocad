@@ -501,12 +501,15 @@ def check_duplicate_entities(doc: ezdxf.document.Drawing, config: dict) -> List[
         issues.append(Issue(
             rule="DUPLICATE_ENTITIES",
             severity=Severity.ERROR,
-            message=f"Entidade '{entity.dxftype()}' duplicada na layer '{entity.dxf.layer}'",
+            message=(
+                f"Entidade '{entity.dxftype()}' duplicada na layer '{entity.dxf.layer}' "
+                f"(handle: {entity.dxf.get('handle','')})"
+            ),
             entity_type=entity.dxftype(),
             layer=entity.dxf.layer,
             handle=entity.dxf.get("handle", ""),
             location=_coord(entity),
-            details=f"Duplicata do handle #{orig}",
+            details=f"Duplicata do handle #{orig} | Coordenadas: {_coord(entity)}",
         ))
     if len(dups) > MAX:
         issues.append(Issue(
@@ -551,16 +554,18 @@ def check_xrefs(doc: ezdxf.document.Drawing, config: dict) -> List[Issue]:
             file_exists = bool(xref_path) and os.path.isfile(xref_path)
             path_note   = "" if file_exists or not xref_path else " (arquivo não encontrado no disco)"
 
+            # Provide clearer diagnostics and suggested actions
+            msg = (f"XREF '{name}' não carregada{path_note} — verificar dependência"
+                   if not loaded else
+                   f"XREF '{name}' detectada e carregada ({ent_count} entidades)")
+            detail_path = xref_path or '(caminho não definido)'
+            suggestion = "Se o arquivo existe, verifique o caminho ou recarregue o XREF; se for uma dependência perdida, obtenha o arquivo do responsável."
             issues.append(Issue(
                 rule="XREF_NOT_LOADED" if not loaded else "XREF_DETECTED",
                 severity=Severity.ERROR if not loaded else Severity.INFO,
-                message=(
-                    f"XREF '{name}' não carregada{path_note} — verificar dependência"
-                    if not loaded else
-                    f"XREF '{name}' detectada e carregada ({ent_count} entidades)"
-                ),
+                message=msg,
                 entity_type=f"XREF_{xref_type}",
-                details=f"Arquivo: {xref_path or '(caminho não definido)'}",
+                details=f"Arquivo: {detail_path} | {suggestion}",
             ))
         except Exception:
             pass
@@ -610,12 +615,17 @@ def check_title_block(doc: ezdxf.document.Drawing, config: dict) -> List[Issue]:
     ]
     if found:
         return []
+    # Be more specific: include suggested names and guidance
+    suggestion = ", ".join(sorted(list(_TITLE_KEYWORDS)[:6]))
     return [Issue(
         rule="TITLE_BLOCK_MISSING",
         severity=Severity.WARNING,
         message="Bloco de carimbo não encontrado no model space",
         entity_type="BLOCK",
-        details="Nomes aceitos: TITULO, TITLE, CARIMBO, SELO, TITLEBLOCK, LEGENDA…",
+        details=(
+            f"Nomes aceitos (ex): {suggestion} — insira um BLOCK/INSERT com um destes nomes. "
+            "Sugestão: crie um bloco 'TITLEBLOCK' com atributos de carimbo."
+        ),
     )]
 
 
@@ -747,15 +757,15 @@ def check_external_fonts(doc: ezdxf.document.Drawing, config: dict) -> List[Issu
             .strip()
         )
         if font_clean not in _STANDARD_FONTS:
+            suggestion = "Substituir por fonte padrão (ex: ARIAL) ou embutir a fonte antes de compartilhar."
             issues.append(Issue(
                 rule="EXTERNAL_FONT",
                 severity=Severity.INFO,
                 message=(
-                    f"Estilo '{name}' usa fonte não-padrão '{raw_font}' "
-                    "— garanta que o destinatário possui esta fonte"
+                    f"Estilo '{name}' usa fonte não-padrão '{raw_font}' — risco de ausência no destino"
                 ),
                 entity_type="STYLE",
-                details=f"Fonte: {raw_font}",
+                details=f"Fonte: {raw_font} | {suggestion}",
             ))
     return issues
 

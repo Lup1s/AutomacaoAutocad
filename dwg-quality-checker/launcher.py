@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import platform
 import subprocess
 import sys
 import threading
@@ -28,7 +29,7 @@ except ImportError:
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from checker.core import DXFChecker
+from checker.core import DXFChecker, merge_profiles_into_config
 from checker.i18n import _, get_lang, set_lang
 from checker.report import (
     generate_batch_dashboard,
@@ -37,14 +38,12 @@ from checker.report import (
     generate_html_report,
     generate_pdf_report,
 )
+from checker.version import APP_VERSION, AUTHOR, COMPANY, EMAIL
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
-VERSION = "2.6.0"
-AUTHOR  = "Luiz Q. Melo"
-COMPANY = "Vantara Tech"
-EMAIL   = "luiz.queiroz240202@gmail.com"
+VERSION = APP_VERSION
 
 if getattr(sys, 'frozen', False):
     _BASE_DIR = Path(sys.executable).parent   # ao lado do .exe instalado
@@ -276,17 +275,25 @@ class HistoryWindow(ctk.CTkToplevel):
         tb = ctk.CTkFrame(self, fg_color="transparent")
         tb.grid(row=0, column=0, padx=14, pady=(12, 6), sticky="ew")
         tb.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(tb, text="📜  Histórico",
+        ctk.CTkLabel(tb, text=_('history_header'),
                      font=ctk.CTkFont(size=13, weight="bold"), text_color=C["text"]
         ).grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(tb, text=_('history_hint'),
+                     font=ctk.CTkFont(size=10), text_color=C["muted"]
+        ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(2, 0))
+
+        ctk.CTkButton(tb, text=_('btn_open_report'), width=115, height=26,
+                      corner_radius=8, fg_color=C["accent"], hover_color="#2f6cd1",
+                      font=ctk.CTkFont(size=11, weight="bold"), command=self._open,
+        ).grid(row=0, column=1, padx=(0, 8), sticky="e")
         ctk.CTkButton(tb, text=f"📈  {_('chart_title')}", width=120, height=26,
                       corner_radius=8, fg_color=C["surface2"], hover_color=C["border"],
                       font=ctk.CTkFont(size=11), command=self._show_trend,
-        ).grid(row=0, column=2, padx=(0, 8))
-        ctk.CTkButton(tb, text="🗑️  Limpar", width=90, height=26, corner_radius=8,
+        ).grid(row=0, column=2, padx=(0, 8), sticky="e")
+        ctk.CTkButton(tb, text=f"🗑️  {_('btn_clear')}", width=90, height=26, corner_radius=8,
                       fg_color=C["surface2"], hover_color=C["border"],
                       font=ctk.CTkFont(size=11), command=self._clear
-        ).grid(row=0, column=3)
+        ).grid(row=0, column=3, sticky="e")
 
         tc = ctk.CTkFrame(self, fg_color=C["surface"], corner_radius=10)
         tc.grid(row=1, column=0, padx=12, pady=(0, 10), sticky="nsew")
@@ -325,13 +332,17 @@ class HistoryWindow(ctk.CTkToplevel):
     def _refresh(self) -> None:
         self.tree.delete(*self.tree.get_children())
         self._html_map.clear()
-        for idx, e in enumerate(_load_history()):
+        hist = _load_history()
+        if not hist:
+            self.tree.insert("", "end", values=("—", "—", _('history_empty'), "—", "—", "—"))
+            return
+        for idx, e in enumerate(hist):
             tag  = "pass" if e["passed"] else "fail"
             tags = (tag, "alt") if idx % 2 else (tag,)
             iid  = str(idx)
             self.tree.insert("", "end", iid=iid, values=(
                 e["timestamp"], e["file"],
-                "✅ OK" if e["passed"] else "❌ FALHOU",
+                _('watch_passed') if e["passed"] else _('watch_failed'),
                 e["errors"], e["warnings"], e["infos"],
             ), tags=tags)
             self._html_map[iid] = e.get("html_path")
@@ -344,7 +355,7 @@ class HistoryWindow(ctk.CTkToplevel):
         if html and Path(html).exists():
             webbrowser.open(f"file:///{Path(html).resolve()}")
         else:
-            messagebox.showinfo("Não encontrado", "Relatório não encontrado.", parent=self)
+            messagebox.showinfo(_('common_not_found_title'), _('common_report_not_found'), parent=self)
 
     def _show_trend(self) -> None:
         """Abre uma janela com gráfico de tendência de erros ao longo do tempo."""
@@ -428,7 +439,7 @@ class HistoryWindow(ctk.CTkToplevel):
                            anchor="w", fill=C["muted"], font=("Segoe UI", 8))
 
     def _clear(self) -> None:
-        if messagebox.askyesno("Limpar histórico", "Apagar todo o histórico?", parent=self):
+        if messagebox.askyesno(_('history_clear_title'), _('history_clear_msg'), parent=self):
             _save_history([])
             self._refresh()
 
@@ -463,7 +474,7 @@ class BatchWindow(ctk.CTkToplevel):
         fc.grid(row=0, column=0, padx=12, pady=(12, 6), sticky="ew")
         fc.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(fc, text="Pasta:",
+        ctk.CTkLabel(fc, text=_('batch_folder_label'),
                      font=ctk.CTkFont(size=11, weight="bold"), text_color=C["muted"]
         ).grid(row=0, column=0, padx=(14, 8), pady=10, sticky="w")
 
@@ -475,9 +486,13 @@ class BatchWindow(ctk.CTkToplevel):
                      font=ctk.CTkFont(size=11)
         ).grid(row=0, column=1, padx=(0, 8), pady=10, sticky="ew")
 
-        ctk.CTkButton(fc, text=_('btn_open'), width=82, height=30, corner_radius=8,
-                      command=self._browse_folder
-        ).grid(row=0, column=2, padx=(0, 12), pady=10)
+        self._browse_btn = ctk.CTkButton(fc, text=_('btn_open'), width=82, height=30, corner_radius=8,
+                         command=self._browse_folder)
+        self._browse_btn.grid(row=0, column=2, padx=(0, 12), pady=10)
+
+        ctk.CTkLabel(fc, text=_('batch_flow_hint'),
+                 font=ctk.CTkFont(size=10), text_color=C["muted"]
+        ).grid(row=1, column=0, columnspan=3, padx=(14, 12), pady=(0, 8), sticky="w")
 
         # ── Action row ────────────────────────────────────────────────────────
         ar = ctk.CTkFrame(self, fg_color="transparent")
@@ -491,17 +506,31 @@ class BatchWindow(ctk.CTkToplevel):
         self._start_btn.grid(row=0, column=0, padx=(0, 8))
 
         self._stop_btn = ctk.CTkButton(
-            ar, text="⏹ Parar", width=80, height=30, corner_radius=8,
+            ar, text=_('batch_btn_stop'), width=80, height=30, corner_radius=8,
             fg_color=C["surface2"], hover_color=C["border"],
             font=ctk.CTkFont(size=11), state="disabled", command=self._stop_batch,
         )
         self._stop_btn.grid(row=0, column=1, padx=(0, 12))
 
+        self._clear_btn = ctk.CTkButton(
+            ar, text=_('batch_btn_clear'), width=78, height=30, corner_radius=8,
+            fg_color=C["surface2"], hover_color=C["border"],
+            font=ctk.CTkFont(size=11), command=self._clear_batch,
+        )
+        self._clear_btn.grid(row=0, column=2, padx=(0, 8))
+
         self._batch_lbl = ctk.CTkLabel(
-            ar, text="Selecione uma pasta e clique em Iniciar Lote.",
+            ar, text=_('batch_start_hint'),
             font=ctk.CTkFont(size=11), text_color=C["muted"],
         )
-        self._batch_lbl.grid(row=0, column=2, sticky="w")
+        self._batch_lbl.grid(row=0, column=3, sticky="w")
+
+        self._out_btn = ctk.CTkButton(
+            ar, text=_('btn_open_folder'), width=88, height=30, corner_radius=8,
+            fg_color=C["surface2"], hover_color=C["border"],
+            font=ctk.CTkFont(size=11), command=self._open_folder_in_explorer,
+        )
+        self._out_btn.grid(row=0, column=4, padx=(8, 0))
 
         self._dashboard_btn = ctk.CTkButton(
             ar, text=_('btn_dashboard'), width=115, height=30, corner_radius=8,
@@ -509,7 +538,7 @@ class BatchWindow(ctk.CTkToplevel):
             font=ctk.CTkFont(size=11), state="disabled",
             command=self._open_dashboard,
         )
-        self._dashboard_btn.grid(row=0, column=3, padx=(8, 0))
+        self._dashboard_btn.grid(row=0, column=5, padx=(8, 0))
 
         # ── Results table ─────────────────────────────────────────────────────
         tc = ctk.CTkFrame(self, fg_color=C["surface"], corner_radius=10)
@@ -523,11 +552,11 @@ class BatchWindow(ctk.CTkToplevel):
             show="headings", style="DWG.Treeview", selectmode="browse",
         )
         for col, title, w, anchor in [
-            ("file",     "Arquivo",  310, "w"),
-            ("status",   "Status",    90, "center"),
-            ("errors",   "Erros",     60, "center"),
-            ("warnings", "Avisos",    60, "center"),
-            ("infos",    "Infos",     55, "center"),
+            ("file",     _('col_file'),  310, "w"),
+            ("status",   _('col_status'),    90, "center"),
+            ("errors",   _('col_errors'),     60, "center"),
+            ("warnings", _('col_warnings'),    60, "center"),
+            ("infos",    _('col_infos'),     55, "center"),
         ]:
             self._tree.heading(col, text=title)
             self._tree.column(col, width=w, minwidth=40, anchor=anchor)
@@ -544,7 +573,7 @@ class BatchWindow(ctk.CTkToplevel):
         self._tree.grid(row=0, column=0, sticky="nsew", padx=(8, 0), pady=8)
         vsb.grid(row=0, column=1, sticky="ns", pady=8)
 
-        ctk.CTkLabel(self, text="Duplo clique para abrir o relatório HTML",
+        ctk.CTkLabel(self, text=_('batch_dblclick'),
                      font=ctk.CTkFont(size=10), text_color=C["muted"]
         ).grid(row=3, column=0, pady=(0, 2))
 
@@ -578,7 +607,7 @@ class BatchWindow(ctk.CTkToplevel):
         for idx, f in enumerate(self._files):
             tags = ("alt",) if idx % 2 else ()
             self._tree.insert("", "end", iid=str(idx),
-                               values=(Path(f).name, "⏳ Aguardando", "—", "—", "—"),
+                               values=(Path(f).name, _('batch_waiting'), "—", "—", "—"),
                                tags=tags)
         n = len(self._files)
         self._batch_lbl.configure(text=_('batch_found', n=n))
@@ -589,19 +618,21 @@ class BatchWindow(ctk.CTkToplevel):
             if folder and Path(folder).exists():
                 self._scan_folder(folder)
             if not self._files:
-                messagebox.showwarning("Sem arquivos",
-                                       "Nenhum arquivo DXF encontrado na pasta.", parent=self)
+                messagebox.showwarning(_('batch_no_files_title'),
+                                       _('batch_no_files_msg'), parent=self)
                 return
         self._running    = True
         self._stop_flag  = False
         self._batch_prog.set(0)
         self._start_btn.configure(state="disabled")
         self._stop_btn.configure(state="normal")
+        self._browse_btn.configure(state="disabled")
+        self._clear_btn.configure(state="disabled")
         threading.Thread(target=self._batch_worker, daemon=True).start()
 
     def _stop_batch(self) -> None:
         self._stop_flag = True
-        self._batch_lbl.configure(text="Parando após o arquivo atual...")
+        self._batch_lbl.configure(text=_('batch_stopping'))
 
     def _batch_worker(self) -> None:
         total = len(self._files)
@@ -627,7 +658,7 @@ class BatchWindow(ctk.CTkToplevel):
         base_tags = ("alt",) if int(iid) % 2 else ()
         self._tree.item(iid, tags=("running",) + base_tags)
         vals = list(self._tree.item(iid, "values"))
-        vals[1] = "⏳ Verificando..."
+        vals[1] = _('batch_running')
         self._tree.item(iid, values=vals)
 
     def _set_done(self, iid: str, result: dict, html: str | None) -> None:
@@ -637,7 +668,7 @@ class BatchWindow(ctk.CTkToplevel):
         self._batch_results.append(result)
         self._tree.item(iid, tags=(tag,) + base, values=(
             Path(result["file_path"]).name,
-            "✅ OK" if result["passed"] else "❌ FALHOU",
+            _('batch_passed') if result["passed"] else _('batch_failed'),
             result["errors"], result["warnings"], result["infos"],
         ))
 
@@ -645,27 +676,45 @@ class BatchWindow(ctk.CTkToplevel):
         base = ("alt",) if int(iid) % 2 else ()
         self._tree.item(iid, tags=("err",) + base)
         vals = list(self._tree.item(iid, "values"))
-        vals[1] = f"⚠️ ERRO"
+        vals[1] = _('batch_error')
         self._tree.item(iid, values=vals)
 
     def _update_progress(self, done: int, total: int) -> None:
         self._batch_prog.set(done / total)
-        self._prog_lbl.configure(text=f"{done} / {total} arquivos")
-        self._batch_lbl.configure(text=f"Processando: {done}/{total}  ·  aguarde...")
+        self._prog_lbl.configure(text=_('batch_progress', done=done, total=total))
+        self._batch_lbl.configure(text=_('batch_processing_hint', done=done, total=total))
 
     def _batch_finished(self) -> None:
         self._running = False
         passed = sum(1 for v in self._html_map.values() if v)
         total  = len(self._files)
         if self._stop_flag:
-            self._batch_lbl.configure(text=f"Lote interrompido — {passed} relatório(s) gerado(s)")
+            self._batch_lbl.configure(text=_('batch_stopped', n=passed))
         else:
-            self._batch_lbl.configure(
-                text=f"✅ Lote concluído — {passed}/{total} relatório(s) gerado(s)")
+            self._batch_lbl.configure(text=_('batch_finished', ok=passed, total=total))
         self._start_btn.configure(state="normal")
         self._stop_btn.configure(state="disabled")
+        self._browse_btn.configure(state="normal")
+        self._clear_btn.configure(state="normal")
         if self._batch_results:
             self._dashboard_btn.configure(state="normal")
+
+    def _open_folder_in_explorer(self) -> None:
+        folder = self._folder_var.get().strip()
+        if folder and Path(folder).exists():
+            os.startfile(str(Path(folder).resolve()))
+
+    def _clear_batch(self) -> None:
+        if self._running:
+            return
+        self._tree.delete(*self._tree.get_children())
+        self._files = []
+        self._html_map.clear()
+        self._batch_results = []
+        self._batch_prog.set(0)
+        self._prog_lbl.configure(text="")
+        self._dashboard_btn.configure(state="disabled")
+        self._batch_lbl.configure(text=_('batch_start_hint'))
 
     def _open_dashboard(self) -> None:
         results = [r for r in self._batch_results if r]
@@ -679,7 +728,7 @@ class BatchWindow(ctk.CTkToplevel):
             webbrowser.open(f"file:///{Path(path).resolve()}")
         except Exception as exc:
             logging.error("Dashboard: %s", exc)
-            messagebox.showerror("Erro", f"Falha ao gerar dashboard:\n{exc}", parent=self)
+            messagebox.showerror(_('main_error_title'), _('dashboard_error_msg', err=str(exc)), parent=self)
 
     def _open_report(self) -> None:
         sel = self._tree.selection()
@@ -689,7 +738,7 @@ class BatchWindow(ctk.CTkToplevel):
         if html and Path(html).exists():
             webbrowser.open(f"file:///{Path(html).resolve()}")
         else:
-            messagebox.showinfo("Não encontrado", "Relatório não encontrado.", parent=self)
+            messagebox.showinfo(_('common_not_found_title'), _('common_report_not_found'), parent=self)
 
 
 # ── Config Editor Window ──────────────────────────────────────────────────────
@@ -702,7 +751,7 @@ class ConfigEditorWindow(ctk.CTkToplevel):
 
     def __init__(self, parent) -> None:
         super().__init__(parent)
-        self.title("⚙️  Editor de Configurações")
+        self.title(f"⚙️  {_('config_title')}")
         self.geometry("600x680")
         self.minsize(560, 620)
         self.configure(fg_color=C["bg"])
@@ -757,11 +806,11 @@ class ConfigEditorWindow(ctk.CTkToplevel):
             with open(self._CONFIG_FILE, "w", encoding="utf-8") as f:
                 yaml.dump(self._cfg, f, allow_unicode=True,
                           default_flow_style=False, sort_keys=False)
-            messagebox.showinfo("Salvo", "✅ Configurações salvas com sucesso!", parent=self)
+            messagebox.showinfo(_('config_title'), _('config_saved'), parent=self)
             self.destroy()
         except Exception as exc:
             logging.error("ConfigEditor: erro ao salvar: %s", exc)
-            messagebox.showerror("Erro", f"Não foi possível salvar:\n{exc}", parent=self)
+            messagebox.showerror(_('main_error_title'), _('config_save_error', error=str(exc)), parent=self)
 
     # ── Perfis de configuração ──────────────────────────────────────────────────
 
@@ -796,23 +845,24 @@ class ConfigEditorWindow(ctk.CTkToplevel):
     def _save_profile(self) -> None:
         """Salva a configuração atual como um novo perfil."""
         win = ctk.CTkToplevel(self)
-        win.title("Salvar Perfil")
+        win.title(_('config_profile_save'))
         win.geometry("340x150")
         win.resizable(False, False)
         win.configure(fg_color=C["bg"])
         win.grab_set()
-        ctk.CTkLabel(win, text="Nome do perfil:",
+        ctk.CTkLabel(win, text=_('config_profile_name_label'),
                      font=ctk.CTkFont(size=11), text_color=C["text"]
         ).pack(pady=(20, 4))
         var = ctk.StringVar()
         entry = ctk.CTkEntry(win, textvariable=var, width=260, height=32,
                              font=ctk.CTkFont(size=11),
-                             placeholder_text='Ex: "Padrão Escritório", "Topografia"...')
+                             placeholder_text=_('config_profile_name_ph'))
         entry.pack(pady=(0, 12))
         entry.focus()
         def _do_save():
             name = var.get().strip()
             if not name:
+                messagebox.showwarning(_('config_profile_save'), _('config_profile_empty'), parent=win)
                 return
             self._collect()
             import copy
@@ -820,10 +870,10 @@ class ConfigEditorWindow(ctk.CTkToplevel):
             self._persist_profiles()
             self._profile_menu.configure(values=list(self._profiles.keys()) or [""])
             self._profile_var.set(name)
-            messagebox.showinfo("Perfil salvo", f'✅ Perfil "{name}" salvo com sucesso!', parent=win)
+            messagebox.showinfo(_('config_profile_save'), _('config_profile_saved', name=name), parent=win)
             win.destroy()
         entry.bind("<Return>", lambda _: _do_save())
-        ctk.CTkButton(win, text="💾  Salvar Perfil", width=140, height=30,
+        ctk.CTkButton(win, text=f"💾  {_('config_profile_save')}", width=140, height=30,
                       command=_do_save).pack()
 
     def _load_profile(self) -> None:
@@ -838,14 +888,14 @@ class ConfigEditorWindow(ctk.CTkToplevel):
             widget.destroy()
         self._build()
         self._profile_var.set(name)
-        self._footer_lbl.configure(text=f"Perfil '{name}' carregado")
+        self._footer_lbl.configure(text=_('config_profile_loaded', name=name))
 
     def _delete_profile(self) -> None:
         name = self._profile_var.get()
         if not name or name not in self._profiles:
             return
-        if messagebox.askyesno("Deletar perfil",
-                               f'Deletar o perfil "{name}"?', parent=self):
+        if messagebox.askyesno(_('config_profile_delete'),
+                       _('config_profile_confirm', name=name), parent=self):
             del self._profiles[name]
             self._persist_profiles()
             keys = list(self._profiles.keys())
@@ -865,10 +915,10 @@ class ConfigEditorWindow(ctk.CTkToplevel):
         hdr.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(hdr, text="⚙️", font=ctk.CTkFont(size=22)
         ).grid(row=0, column=0, padx=(16, 8), pady=8)
-        ctk.CTkLabel(hdr, text="Editor de Configurações",
+        ctk.CTkLabel(hdr, text=_('config_title'),
                      font=ctk.CTkFont(size=14, weight="bold"), text_color=C["text"]
         ).grid(row=0, column=1, sticky="w")
-        ctk.CTkLabel(hdr, text="config.yaml",
+        ctk.CTkLabel(hdr, text=_('config_file_name'),
                      font=ctk.CTkFont(size=10), text_color=C["muted"]
         ).grid(row=0, column=2, padx=14)
 
@@ -878,7 +928,7 @@ class ConfigEditorWindow(ctk.CTkToplevel):
         pf.grid_propagate(False)
         pf.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(pf, text="Perfil:",
+        ctk.CTkLabel(pf, text=_('config_profile_label'),
                      font=ctk.CTkFont(size=10, weight="bold"), text_color=C["muted"]
         ).grid(row=0, column=0, padx=(12, 6), pady=8, sticky="w")
 
@@ -894,12 +944,12 @@ class ConfigEditorWindow(ctk.CTkToplevel):
         )
         self._profile_menu.grid(row=0, column=1, padx=(0, 6), pady=6, sticky="w")
 
-        ctk.CTkButton(pf, text="⬇️ Carregar", width=90, height=26, corner_radius=6,
+        ctk.CTkButton(pf, text=f"⬇️ {_('config_profile_load')}", width=90, height=26, corner_radius=6,
                       font=ctk.CTkFont(size=10),
                       fg_color=C["surface"], hover_color=C["border"],
                       command=self._load_profile,
         ).grid(row=0, column=2, padx=(0, 4))
-        ctk.CTkButton(pf, text="💾 Salvar", width=80, height=26, corner_radius=6,
+        ctk.CTkButton(pf, text=f"💾 {_('config_profile_save')}", width=80, height=26, corner_radius=6,
                       font=ctk.CTkFont(size=10),
                       command=self._save_profile,
         ).grid(row=0, column=3, padx=(0, 4))
@@ -921,14 +971,14 @@ class ConfigEditorWindow(ctk.CTkToplevel):
             segmented_button_unselected_hover_color=C["border"],
         )
         tabs.grid(row=2, column=0, padx=12, pady=(8, 4), sticky="nsew")
-        tabs.add("📐  Camadas")
-        tabs.add("✏️  Textos")
-        tabs.add("🔲  Desenho")
-        tabs.add("⚡  Novas Regras")
-        self._build_layers_tab(tabs.tab("📐  Camadas"))
-        self._build_text_tab(tabs.tab("✏️  Textos"))
-        self._build_drawing_tab(tabs.tab("🔲  Desenho"))
-        self._build_extra_rules_tab(tabs.tab("⚡  Novas Regras"))
+        tabs.add(_('config_tab_layers'))
+        tabs.add(_('config_tab_text'))
+        tabs.add(_('config_tab_drawing'))
+        tabs.add(_('tab_extra_rules'))
+        self._build_layers_tab(tabs.tab(_('config_tab_layers')))
+        self._build_text_tab(tabs.tab(_('config_tab_text')))
+        self._build_drawing_tab(tabs.tab(_('config_tab_drawing')))
+        self._build_extra_rules_tab(tabs.tab(_('tab_extra_rules')))
 
         # ── Footer ────────────────────────────────────────────────────────────
         ftr = ctk.CTkFrame(self, fg_color="transparent")
@@ -939,11 +989,11 @@ class ConfigEditorWindow(ctk.CTkToplevel):
         )
         self._footer_lbl.grid(row=0, column=0, sticky="w")
         ctk.CTkButton(
-            ftr, text="💾  Salvar", width=120, height=36, corner_radius=8,
+            ftr, text=_('config_btn_save'), width=120, height=36, corner_radius=8,
             font=ctk.CTkFont(size=12, weight="bold"), command=self._save,
         ).grid(row=0, column=1, padx=(0, 8))
         ctk.CTkButton(
-            ftr, text="Cancelar", width=95, height=36, corner_radius=8,
+            ftr, text=_('config_btn_close'), width=95, height=36, corner_radius=8,
             fg_color=C["surface2"], hover_color=C["border"],
             font=ctk.CTkFont(size=12), text_color=C["muted"],
             command=self.destroy,
@@ -957,11 +1007,11 @@ class ConfigEditorWindow(ctk.CTkToplevel):
         self._req_layers: list[str] = list(layers_cfg.get("required") or [])
 
         # --- Required layers ---
-        ctk.CTkLabel(parent, text="Layers obrigatórias",
+        ctk.CTkLabel(parent, text=_('config_layers_required_title'),
                      font=ctk.CTkFont(size=12, weight="bold"), text_color=C["text"]
         ).grid(row=0, column=0, sticky="w", pady=(12, 2))
         ctk.CTkLabel(parent,
-                     text="O desenho DEVE conter todas estas layers (vazio = não verificar)",
+                 text=_('config_layers_required_hint'),
                      font=ctk.CTkFont(size=10), text_color=C["muted"]
         ).grid(row=1, column=0, sticky="w", pady=(0, 6))
 
@@ -986,37 +1036,36 @@ class ConfigEditorWindow(ctk.CTkToplevel):
         self._new_layer_var = ctk.StringVar()
         new_entry = ctk.CTkEntry(
             add_row, textvariable=self._new_layer_var,
-            placeholder_text="Nome da layer (ex: TEXTO, COTA)...",
+            placeholder_text=_('config_layer_name_ph'),
             height=30, corner_radius=6, font=ctk.CTkFont(size=11),
             fg_color=C["surface"], border_color=C["border"],
         )
         new_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         new_entry.bind("<Return>", lambda _: self._add_layer())
 
-        ctk.CTkButton(add_row, text="＋ Adicionar", width=100, height=30,
+        ctk.CTkButton(add_row, text=_('config_btn_add_layer'), width=100, height=30,
                       corner_radius=6, font=ctk.CTkFont(size=11),
                       command=self._add_layer,
         ).grid(row=0, column=1, padx=(0, 6))
-        ctk.CTkButton(add_row, text="🗑 Remover", width=90, height=30,
+        ctk.CTkButton(add_row, text=_('config_btn_remove_layer'), width=90, height=30,
                       corner_radius=6, font=ctk.CTkFont(size=11),
                       fg_color=C["surface"], hover_color=C["border"],
                       text_color=C["muted"], command=self._remove_layer,
         ).grid(row=0, column=2)
 
         # --- Naming convention ---
-        ctk.CTkLabel(parent, text="Padrão de nomenclatura (Regex)",
+        ctk.CTkLabel(parent, text=_('config_naming_title'),
                      font=ctk.CTkFont(size=12, weight="bold"), text_color=C["text"]
         ).grid(row=3, column=0, sticky="w", pady=(12, 2))
         ctk.CTkLabel(parent,
-                     text='Ex: "^[A-Z]{2,4}-[A-Z0-9_-]+$"  →  ARQ-PAREDE, EST-VIGA\n'
-                          '(vazio = desabilitar verificação de nomenclatura)',
+                     text=_('config_naming_hint'),
                      font=ctk.CTkFont(size=10), text_color=C["muted"], justify="left",
         ).grid(row=4, column=0, sticky="w", pady=(0, 6))
 
         self._naming_var = ctk.StringVar(
             value=layers_cfg.get("naming_convention") or "")
         ctk.CTkEntry(parent, textvariable=self._naming_var,
-                     placeholder_text="Regex (vazio = desabilitado)...",
+                     placeholder_text=_('config_naming_ph'),
                      height=34, corner_radius=8, font=ctk.CTkFont(size=11),
                      fg_color=C["surface2"], border_color=C["border"],
         ).grid(row=5, column=0, sticky="ew")
@@ -1040,7 +1089,7 @@ class ConfigEditorWindow(ctk.CTkToplevel):
         parent.grid_columnconfigure(0, weight=1)
         text_cfg = self._cfg.get("text", {})
 
-        ctk.CTkLabel(parent, text="Alturas de texto permitidas",
+        ctk.CTkLabel(parent, text=_('config_text_heights_title'),
                      font=ctk.CTkFont(size=12, weight="bold"), text_color=C["text"]
         ).grid(row=0, column=0, columnspan=4, sticky="w", pady=(12, 8))
 
@@ -1048,18 +1097,18 @@ class ConfigEditorWindow(ctk.CTkToplevel):
         ref = ctk.CTkFrame(parent, fg_color=C["surface2"], corner_radius=8)
         ref.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(0, 20))
 
-        headers = [("Tipo de projeto", 230), ("Mín", 70), ("Máx", 70)]
+        headers = [(_('config_text_col_type'), 230), (_('config_text_col_min'), 70), (_('config_text_col_max'), 70)]
         for col, (h, w) in enumerate(headers):
             ctk.CTkLabel(ref, text=h, font=ctk.CTkFont(size=9, weight="bold"),
                          text_color=C["muted"], width=w, anchor="w"
             ).grid(row=0, column=col, padx=(10, 4), pady=(6, 2), sticky="w")
 
         for i, (tipo, mn, mx) in enumerate([
-            ("Topografia / UTM (m)",          "0.50", "20.0"),
-            ("Arquitetura 1:50 (mm)",          "1.50", "10.0"),
-            ("Estrutural / Civil (m)",         "0.10",  "5.0"),
-            ("Mecânico / Industrial (mm)",    "2.00", "15.0"),
-            ("Levantamento topográfico (m)",  "0.03", "50.0"),
+            (_('config_text_ref_topo_utm'), "0.50", "20.0"),
+            (_('config_text_ref_arch_150'), "1.50", "10.0"),
+            (_('config_text_ref_struct_civil'), "0.10", "5.0"),
+            (_('config_text_ref_mech_industrial'), "2.00", "15.0"),
+            (_('config_text_ref_topo_survey'), "0.03", "50.0"),
         ]):
             fg = C["surface"] if i % 2 else C["surface2"]
             for col, (val, clr, w) in enumerate([
@@ -1073,8 +1122,8 @@ class ConfigEditorWindow(ctk.CTkToplevel):
 
         # --- Min / Max entries ---
         for col_off, (label, key, attr, clr) in enumerate([
-            ("Altura mínima", "min_height", "_min_h_var", C["success"]),
-            ("Altura máxima", "max_height", "_max_h_var", C["error"]),
+            (_('config_text_min_height'), "min_height", "_min_h_var", C["success"]),
+            (_('config_text_max_height'), "max_height", "_max_h_var", C["error"]),
         ]):
             c = col_off * 2
             ctk.CTkLabel(parent, text=label,
@@ -1089,7 +1138,7 @@ class ConfigEditorWindow(ctk.CTkToplevel):
             ).grid(row=3, column=c, sticky="w", padx=(0 if c == 0 else 20, 0), pady=(4, 0))
 
         ctk.CTkLabel(parent,
-                     text="Unidades devem ser consistentes com o arquivo DXF (metros, mm, etc.)",
+                     text=_('config_text_units_hint'),
                      font=ctk.CTkFont(size=10), text_color=C["muted"],
         ).grid(row=4, column=0, columnspan=4, sticky="w", pady=(12, 0))
 
@@ -1102,32 +1151,32 @@ class ConfigEditorWindow(ctk.CTkToplevel):
 
         RULES = [
             ("check_entities_on_layer_0",
-             "Entidades na Layer 0",
-             "Objetos desenhados diretamente na layer 0 (má prática de organização)"),
+               _('cfg_rule_layer0_label'),
+               _('cfg_rule_layer0_desc')),
             ("check_unused_blocks",
-             "Blocos não utilizados",
-             "Blocos definidos no arquivo mas nunca inseridos no model space"),
+               _('cfg_rule_unused_blocks_label'),
+               _('cfg_rule_unused_blocks_desc')),
             ("check_empty_layers",
-             "Layers vazias",
-             "Layers existentes sem nenhuma entidade associada"),
+               _('cfg_rule_empty_layers_label'),
+               _('cfg_rule_empty_layers_desc')),
             ("check_frozen_layers",
-             "Layers congeladas com dados",
-             "Layers congeladas que ainda possuem entidades (potencial confusão)"),
+               _('cfg_rule_frozen_layers_label'),
+               _('cfg_rule_frozen_layers_desc')),
             ("check_off_layers",
-             "Layers desligadas com dados",
-             "Layers desligadas (off) que ainda possuem entidades"),
+               _('cfg_rule_off_layers_label'),
+               _('cfg_rule_off_layers_desc')),
             ("check_color_bylayer",
-             "Cor explícita (não ByLayer)",
-             "Entidades com cor definida diretamente, fora do padrão ByLayer"),
+               _('cfg_rule_color_bylayer_label'),
+               _('cfg_rule_color_bylayer_desc')),
             ("check_linetype_bylayer",
-             "Tipo de linha explícito",
-             "Entidades com tipo de linha definido diretamente, fora do padrão ByLayer"),
+               _('cfg_rule_linetype_bylayer_label'),
+               _('cfg_rule_linetype_bylayer_desc')),
             ("check_duplicates",
-             "Entidades duplicadas",
-             "Detecta entidades sobrepostas com mesmo tipo, layer e coordenadas"),
+               _('cfg_rule_duplicates_label'),
+               _('cfg_rule_duplicates_desc')),
             ("check_xrefs",
-             "Referências externas (XREF)",
-             "Verifica se XREFs estão carregadas e acessíveis no disco"),
+               _('cfg_rule_xrefs_label'),
+               _('cfg_rule_xrefs_desc')),
         ]
 
         scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent", corner_radius=0)
@@ -1176,23 +1225,23 @@ class ConfigEditorWindow(ctk.CTkToplevel):
 
         EXTRA_RULES = [
             ("check_title_block",    "TITLE_BLOCK_MISSING",
-             "Bloco de Carimbo",
-             "Detecta ausência de INSERT com nome de carimbo no model space"),
+               _('cfg_extra_title_block_label'),
+               _('cfg_extra_title_block_desc')),
             ("check_viewport",       "VIEWPORT_NO_SCALE",
-             "Escala de Viewport",
-             "Verifica VIEWPORTs sem escala definida em layouts de paper space"),
+               _('cfg_extra_viewport_scale_label'),
+               _('cfg_extra_viewport_scale_desc')),
             ("check_mtext_overflow", "MTEXT_OVERFLOW",
-             "Transbordamento MTEXT",
-             "Estima se o conteúdo de MTEXT ultrapassa o boundary box definido"),
+               _('cfg_extra_mtext_overflow_label'),
+               _('cfg_extra_mtext_overflow_desc')),
             ("check_external_fonts", "EXTERNAL_FONT",
-             "Fontes Externas",
-             "Detecta estilos de texto com fontes não-padrão (TTF proprietárias / SHX incomuns)"),
+               _('cfg_extra_external_fonts_label'),
+               _('cfg_extra_external_fonts_desc')),
             ("check_line_weights",   "LINEWEIGHT_NOT_BYLAYER",
-             "Espessura de Linha Explícita",
-             "Entidades com espessura definida diretamente, fora do padrão ByLayer"),
+               _('cfg_extra_lineweight_label'),
+               _('cfg_extra_lineweight_desc')),
             ("check_plot_styles",    "PLOT_STYLE_NOT_SET",
-             "Estilo de Plotagem",
-             "Verifica se CTB/STB está configurado no header do DXF"),
+               _('cfg_extra_plot_style_label'),
+               _('cfg_extra_plot_style_desc')),
         ]
 
         scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent", corner_radius=0)
@@ -1239,7 +1288,7 @@ class ConfigEditorWindow(ctk.CTkToplevel):
 
             sev_frame = ctk.CTkFrame(row_f, fg_color="transparent")
             sev_frame.grid(row=0, column=2, rowspan=2, padx=(4, 12), pady=10)
-            ctk.CTkLabel(sev_frame, text="Severidade:",
+            ctk.CTkLabel(sev_frame, text=_('config_severity_label'),
                          font=ctk.CTkFont(size=9), text_color=C["muted"]
             ).pack(anchor="w")
             ctk.CTkOptionMenu(
@@ -1287,9 +1336,12 @@ class WatchFolderWindow(ctk.CTkToplevel):
 
         ctk.CTkLabel(fc, text="👁️", font=ctk.CTkFont(size=20)
         ).grid(row=0, column=0, padx=(14, 8), pady=10)
-        ctk.CTkLabel(fc, text="Watch Folder",
+        ctk.CTkLabel(fc, text=_('watch_header'),
                      font=ctk.CTkFont(size=13, weight="bold"), text_color=C["text"]
         ).grid(row=0, column=1, sticky="w")
+        ctk.CTkLabel(fc, text=_('watch_flow_hint'),
+                 font=ctk.CTkFont(size=10), text_color=C["muted"]
+        ).grid(row=0, column=2, columnspan=2, padx=(8, 8), sticky="w")
 
         self._folder_var = ctk.StringVar()
         ctk.CTkEntry(fc, textvariable=self._folder_var,
@@ -1307,29 +1359,43 @@ class WatchFolderWindow(ctk.CTkToplevel):
                       command=self._browse,
         ).grid(row=0, column=0, padx=(0, 6))
 
+        self._open_folder_btn = ctk.CTkButton(
+            ar, text=_('btn_open_folder'), width=82, height=28, corner_radius=8,
+            fg_color=C["surface2"], hover_color=C["border"],
+            command=self._open_folder,
+        )
+        self._open_folder_btn.grid(row=0, column=1, padx=(0, 6))
+
         self._watch_btn = ctk.CTkButton(
             ar, text=_('watch_btn_start'), width=160, height=28, corner_radius=8,
             font=ctk.CTkFont(size=11, weight="bold"),
             command=self._toggle_watch,
         )
-        self._watch_btn.grid(row=0, column=1, padx=(0, 8))
+        self._watch_btn.grid(row=0, column=2, padx=(0, 8))
+
+        self._clear_watch_btn = ctk.CTkButton(
+            ar, text=_('watch_btn_clear'), width=72, height=28, corner_radius=8,
+            fg_color=C["surface2"], hover_color=C["border"],
+            command=self._clear_rows,
+        )
+        self._clear_watch_btn.grid(row=0, column=3, padx=(0, 8))
 
         # Intervalo de verificação
         ctk.CTkLabel(ar, text=_('watch_interval_lbl'),
                      font=ctk.CTkFont(size=10), text_color=C["muted"]
-        ).grid(row=0, column=2, padx=(0, 4))
+        ).grid(row=0, column=4, padx=(0, 4))
         self._interval_var = ctk.StringVar(value="10")
         ctk.CTkEntry(ar, textvariable=self._interval_var,
                      width=52, height=28, corner_radius=6,
                      font=ctk.CTkFont(size=11),
                      fg_color=C["surface2"], border_color=C["border"],
-        ).grid(row=0, column=3, sticky="w")
+        ).grid(row=0, column=5, sticky="w")
 
         self._status_lbl = ctk.CTkLabel(
             ar, text=_('watch_status_stopped'),
             font=ctk.CTkFont(size=10), text_color=C["muted"],
         )
-        self._status_lbl.grid(row=0, column=4, padx=(14, 0), sticky="w")
+        self._status_lbl.grid(row=0, column=6, padx=(14, 0), sticky="w")
 
         # ── Tabela de resultados ─────────────────────────────────────────────
         tc = ctk.CTkFrame(self, fg_color=C["surface"], corner_radius=10)
@@ -1369,7 +1435,7 @@ class WatchFolderWindow(ctk.CTkToplevel):
     # ── Lógica ───────────────────────────────────────────────────────────────
 
     def _browse(self) -> None:
-        d = filedialog.askdirectory(title="Selecionar pasta para monitorar")
+        d = filedialog.askdirectory(title=_('watch_select_folder'))
         if d:
             self._folder_var.set(d)
 
@@ -1472,7 +1538,7 @@ class WatchFolderWindow(ctk.CTkToplevel):
         idx = len(self._tree.get_children())
         self._tree.insert("", 0, iid=str(idx), values=(
             datetime.now().strftime("%H:%M:%S"),
-            Path(fp).name, "⚠️ ERRO", "—", "—",
+            Path(fp).name, _('watch_error_row'), "—", "—",
         ), tags=("fail",))
 
     def _open_report(self) -> None:
@@ -1483,11 +1549,21 @@ class WatchFolderWindow(ctk.CTkToplevel):
         if html and Path(html).exists():
             webbrowser.open(f"file:///{Path(html).resolve()}")
         else:
-            messagebox.showinfo("Não encontrado", "Relatório não encontrado.", parent=self)
+            messagebox.showinfo(_('common_not_found_title'), _('common_report_not_found'), parent=self)
 
     def _on_close(self) -> None:
         self._stop_watch()
         self.destroy()
+
+    def _open_folder(self) -> None:
+        folder = self._folder_var.get().strip()
+        if folder and Path(folder).exists():
+            os.startfile(str(Path(folder).resolve()))
+
+    def _clear_rows(self) -> None:
+        self._tree.delete(*self._tree.get_children())
+        self._html_map.clear()
+        self._status_lbl.configure(text=_('watch_status_stopped'), text_color=C["muted"])
 
 
 # ── Revision Comparison Window ────────────────────────────────────────────────
@@ -1524,7 +1600,7 @@ class CompareWindow(ctk.CTkToplevel):
             var = ctk.StringVar()
             setattr(self, attr, var)
             ctk.CTkEntry(hdr, textvariable=var,
-                         placeholder_text="Selecionar arquivo .DXF...",
+                         placeholder_text=_('compare_file_ph'),
                          height=30, corner_radius=8,
                          fg_color=C["surface2"], border_color=C["border"],
                          font=ctk.CTkFont(size=11),
@@ -1536,8 +1612,13 @@ class CompareWindow(ctk.CTkToplevel):
         _file_row(0, 1, 2, _('compare_file_a'), "_file_a")
         _file_row(4, 5, 6, _('compare_file_b'), "_file_b")
 
+        ctk.CTkLabel(hdr,
+             text=_('compare_flow_hint'),
+                 font=ctk.CTkFont(size=10), text_color=C["muted"]
+        ).grid(row=1, column=0, columnspan=7, padx=12, pady=(0, 4), sticky="w")
+
         ar = ctk.CTkFrame(hdr, fg_color="transparent")
-        ar.grid(row=1, column=0, columnspan=7, padx=12, pady=(0, 10), sticky="ew")
+        ar.grid(row=2, column=0, columnspan=7, padx=12, pady=(0, 10), sticky="ew")
         ar.grid_columnconfigure(2, weight=1)
 
         self._compare_btn = ctk.CTkButton(
@@ -1547,15 +1628,27 @@ class CompareWindow(ctk.CTkToplevel):
         )
         self._compare_btn.grid(row=0, column=0, padx=(0, 12))
 
+        ctk.CTkButton(
+            ar, text=_('btn_swap'), width=86, height=30, corner_radius=8,
+            fg_color=C["surface2"], hover_color=C["border"],
+            font=ctk.CTkFont(size=11), command=self._swap_files,
+        ).grid(row=0, column=1, padx=(0, 8))
+
+        ctk.CTkButton(
+            ar, text=_('btn_clear'), width=78, height=30, corner_radius=8,
+            fg_color=C["surface2"], hover_color=C["border"],
+            font=ctk.CTkFont(size=11), command=self._clear_compare,
+        ).grid(row=0, column=2, padx=(0, 10))
+
         self._cmp_status = ctk.CTkLabel(
             ar, text=_('compare_select_msg'),
             font=ctk.CTkFont(size=11), text_color=C["muted"],
         )
-        self._cmp_status.grid(row=0, column=2, sticky="w")
+        self._cmp_status.grid(row=0, column=3, sticky="w")
 
         # Badges de diferenças
         bg = ctk.CTkFrame(ar, fg_color="transparent")
-        bg.grid(row=0, column=3)
+        bg.grid(row=0, column=4)
         self._add_b  = self._badge(bg, "➕ 0", C["success"], "#0d2e1a", 0)
         self._rem_b  = self._badge(bg, "➖ 0", C["error"],   C["err_bg"],  1)
         self._mod_b  = self._badge(bg, "✏️ 0",  C["warning"], C["warn_bg"], 2)
@@ -1624,11 +1717,29 @@ class CompareWindow(ctk.CTkToplevel):
 
     def _browse_file(self, attr: str) -> None:
         p = filedialog.askopenfilename(
-            title="Selecionar arquivo DXF",
+            title=_('compare_select_file_title'),
             filetypes=[("DXF", "*.dxf"), ("Todos", "*.*")],
         )
         if p:
             getattr(self, attr).set(p)
+            self._cmp_status.configure(text=_('compare_selected', file=Path(p).name), text_color=C["muted"])
+
+    def _swap_files(self) -> None:
+        a = self._file_a.get()
+        b = self._file_b.get()
+        self._file_a.set(b)
+        self._file_b.set(a)
+
+    def _clear_compare(self) -> None:
+        self._file_a.set("")
+        self._file_b.set("")
+        self._all_diff_rows = []
+        self._diff_tree.delete(*self._diff_tree.get_children())
+        self._diff_sev.set(_('compare_filter_all'))
+        self._add_b.configure(text="➕ 0")
+        self._rem_b.configure(text="➖ 0")
+        self._mod_b.configure(text="✏️ 0")
+        self._cmp_status.configure(text=_('compare_select_msg'), text_color=C["muted"])
 
     def _compare(self) -> None:
         fa = self._file_a.get().strip()
@@ -1640,7 +1751,7 @@ class CompareWindow(ctk.CTkToplevel):
         for fp in (fa, fb):
             if not Path(fp).exists():
                 messagebox.showwarning(_('compare_not_found'),
-                                       f"Não encontrado:\n{fp}", parent=self)
+                                       f"{_('compare_not_found')}:\n{fp}", parent=self)
                 return
 
         self._compare_btn.configure(state="disabled", text=_('compare_btn_loading'))
@@ -1743,7 +1854,7 @@ class CompareWindow(ctk.CTkToplevel):
 
     def _cmp_error(self, msg: str) -> None:
         self._compare_btn.configure(state="normal", text=_('compare_btn'))
-        self._cmp_status.configure(text=f"Erro: {msg}", text_color=C["error"])
+        self._cmp_status.configure(text=_('compare_error_prefix', msg=msg), text_color=C["error"])
         messagebox.showerror(_('compare_error_title'), msg, parent=self)
 
 
@@ -1780,6 +1891,9 @@ def _check_for_update(current_version: str, callback) -> None:
 # ── Main Application ──────────────────────────────────────────────────────────
 
 class App(ctk.CTk):
+    _PROFILES_FILE = _BASE_DIR / "config_profiles.json"
+    _BASE_PROFILE_LABEL = "config.yaml (base)"
+
     def __init__(self) -> None:
         super().__init__()
         # Inicializa suporte a drag & drop antes de qualquer widget
@@ -1800,6 +1914,7 @@ class App(ctk.CTk):
         self._xlsx_path:  str | None = None
         self._all_issues: list       = []
         self.auto_open_var = ctk.BooleanVar(value=True)
+        self._profiles_runtime: dict = self._load_runtime_profiles()
 
         _apply_style()
 
@@ -1826,44 +1941,57 @@ class App(ctk.CTk):
         ctk.CTkLabel(h, text="🏗️", font=ctk.CTkFont(size=22)
         ).grid(row=0, column=0, padx=(18, 8), pady=8)
 
-        ctk.CTkLabel(h, text="DWG Quality Checker",
+        ctk.CTkLabel(h, text=_('app_name'),
                      font=ctk.CTkFont(size=15, weight="bold"), text_color=C["text"]
         ).grid(row=0, column=1, sticky="w")
 
-        ctk.CTkButton(
+        self._btn_history = ctk.CTkButton(
             h, text=_('btn_history'), width=105, height=28, corner_radius=8,
             fg_color=C["surface2"], hover_color=C["border"],
             font=ctk.CTkFont(size=11), text_color=C["muted"],
             command=self._open_history,
-        ).grid(row=0, column=2, padx=(0, 6))
+        )
+        self._btn_history.grid(row=0, column=2, padx=(0, 6))
 
-        ctk.CTkButton(
+        self._btn_watch = ctk.CTkButton(
             h, text=_('btn_watch'), width=88, height=28, corner_radius=8,
             fg_color=C["surface2"], hover_color=C["border"],
             font=ctk.CTkFont(size=11), text_color=C["muted"],
             command=self._open_watch,
-        ).grid(row=0, column=3, padx=(0, 6))
+        )
+        self._btn_watch.grid(row=0, column=3, padx=(0, 6))
 
-        ctk.CTkButton(
+        self._btn_compare = ctk.CTkButton(
             h, text=_('btn_compare'), width=100, height=28, corner_radius=8,
             fg_color=C["surface2"], hover_color=C["border"],
             font=ctk.CTkFont(size=11), text_color=C["muted"],
             command=self._open_compare,
-        ).grid(row=0, column=4, padx=(0, 6))
+        )
+        self._btn_compare.grid(row=0, column=4, padx=(0, 6))
 
-        ctk.CTkButton(
+        self._btn_config = ctk.CTkButton(
             h, text=_('btn_config'), width=90, height=28, corner_radius=8,
             fg_color=C["surface2"], hover_color=C["border"],
             font=ctk.CTkFont(size=11), text_color=C["muted"],
             command=self._open_config,
-        ).grid(row=0, column=5, padx=(0, 6))
+        )
+        self._btn_config.grid(row=0, column=5, padx=(0, 6))
 
-        ctk.CTkButton(
+        self._btn_about = ctk.CTkButton(
             h, text=_('btn_about'), width=85, height=28, corner_radius=8,
             fg_color=C["surface2"], hover_color=C["border"],
             font=ctk.CTkFont(size=11), text_color=C["muted"],
             command=self._open_about,
-        ).grid(row=0, column=6, padx=(0, 14))
+        )
+        self._btn_about.grid(row=0, column=6, padx=(0, 14))
+
+        self._btn_diag = ctk.CTkButton(
+            h, text=_('btn_diag'), width=120, height=28, corner_radius=8,
+            fg_color=C["surface2"], hover_color=C["border"],
+            font=ctk.CTkFont(size=11), text_color=C["muted"],
+            command=self._open_diagnostics,
+        )
+        self._btn_diag.grid(row=0, column=7, padx=(0, 10))
 
     # ── Controls ──────────────────────────────────────────────────────────────
 
@@ -1890,20 +2018,39 @@ class App(ctk.CTk):
             font=ctk.CTkFont(size=11),
         )
         self._file_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
-        ctk.CTkButton(
+
+        self._btn_open = ctk.CTkButton(
             fr, text=_('btn_open'), width=90, height=32, corner_radius=8,
             command=self._browse,
-        ).grid(row=0, column=1, padx=(0, 4))
-        ctk.CTkButton(
+        )
+        self._btn_open.grid(row=0, column=1, padx=(0, 4))
+
+        self._btn_batch = ctk.CTkButton(
             fr, text=_('btn_folder'), width=80, height=32, corner_radius=8,
             fg_color=C["surface2"], hover_color=C["border"],
             font=ctk.CTkFont(size=11),
             command=self._open_batch,
-        ).grid(row=0, column=2)
+        )
+        self._btn_batch.grid(row=0, column=2)
+
+        self._btn_clear = ctk.CTkButton(
+            fr, text=_('btn_clear'), width=70, height=32, corner_radius=8,
+            fg_color=C["surface2"], hover_color=C["border"],
+            font=ctk.CTkFont(size=11),
+            command=self._clear_selection,
+        )
+        self._btn_clear.grid(row=0, column=3, padx=(4, 0))
+
+        ctk.CTkLabel(
+            card,
+            text=_('main_flow_hint'),
+            font=ctk.CTkFont(size=10),
+            text_color=C["muted"],
+        ).grid(row=1, column=0, columnspan=7, padx=14, pady=(0, 6), sticky="w")
 
         # ── Row 1: action ─────────────────────────────────────────────────────
         ar = ctk.CTkFrame(card, fg_color="transparent")
-        ar.grid(row=1, column=0, columnspan=7, padx=14, pady=(0, 12), sticky="ew")
+        ar.grid(row=2, column=0, columnspan=7, padx=14, pady=(0, 12), sticky="ew")
         ar.grid_columnconfigure(3, weight=1)
 
         self.run_btn = ctk.CTkButton(
@@ -1915,22 +2062,54 @@ class App(ctk.CTk):
         self.run_btn.grid(row=0, column=0, padx=(0, 12))
 
         self.strict_var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(ar, text="Strict", variable=self.strict_var,
-                        font=ctk.CTkFont(size=11), text_color=C["muted"], width=68
-        ).grid(row=0, column=1, padx=(0, 20))
+        self._strict_chk = ctk.CTkCheckBox(ar, text=_('main_strict_label'), variable=self.strict_var,
+                           font=ctk.CTkFont(size=11), text_color=C["muted"], width=68)
+        self._strict_chk.grid(row=0, column=1, padx=(0, 20))
+
+        ctk.CTkLabel(ar, text=_("config_profile_label"),
+                     font=ctk.CTkFont(size=10, weight="bold"), text_color=C["muted"]
+        ).grid(row=0, column=2, padx=(0, 6), sticky="e")
+        profile_values = [self._BASE_PROFILE_LABEL, *sorted(self._profiles_runtime.keys())]
+        self._run_profile_var = ctk.StringVar(value=self._BASE_PROFILE_LABEL)
+        self._run_profile_menu = ctk.CTkOptionMenu(
+            ar,
+            variable=self._run_profile_var,
+            values=profile_values,
+            width=170,
+            height=26,
+            corner_radius=6,
+            fg_color=C["surface2"],
+            button_color=C["border"],
+            button_hover_color=C["accent"],
+            font=ctk.CTkFont(size=10),
+        )
+        self._run_profile_menu.grid(row=0, column=3, padx=(0, 10), sticky="w")
+
+        self._run_profiles_multi_var = ctk.StringVar(value="")
+        ctk.CTkEntry(
+            ar,
+            textvariable=self._run_profiles_multi_var,
+            width=220,
+            height=26,
+            corner_radius=6,
+            fg_color=C["surface2"],
+            border_color=C["border"],
+            font=ctk.CTkFont(size=10),
+            placeholder_text="NBR_5410, NBR_9050",
+        ).grid(row=0, column=4, padx=(0, 10), sticky="w")
 
         self._status_icon = ctk.CTkLabel(ar, text="⏳", font=ctk.CTkFont(size=15))
-        self._status_icon.grid(row=0, column=2, padx=(0, 5))
+        self._status_icon.grid(row=0, column=5, padx=(0, 5))
 
         self._status_lbl = ctk.CTkLabel(
-            ar, text="Aguardando arquivo...",
+            ar, text=_('main_status_waiting'),
             font=ctk.CTkFont(size=11), text_color=C["muted"],
         )
-        self._status_lbl.grid(row=0, column=3, sticky="w")
+        self._status_lbl.grid(row=0, column=6, sticky="w")
 
         # Badges
         bg = ctk.CTkFrame(ar, fg_color="transparent")
-        bg.grid(row=0, column=4, padx=(0, 10))
+        bg.grid(row=0, column=7, padx=(0, 10))
         self._err_b  = self._badge(bg, "❌ 0", C["error"],   C["err_bg"],  0)
         self._warn_b = self._badge(bg, "⚠️ 0", C["warning"], C["warn_bg"], 1)
         self._info_b = self._badge(bg, "ℹ️ 0", C["info"],    C["info_bg"], 2)
@@ -1941,7 +2120,7 @@ class App(ctk.CTk):
             font=ctk.CTkFont(size=10, weight="bold"),
             command=self._open_html, state="disabled",
         )
-        self._html_btn.grid(row=0, column=5, padx=(0, 4))
+        self._html_btn.grid(row=0, column=8, padx=(0, 4))
 
         self._csv_btn = ctk.CTkButton(
             ar, text=_('btn_csv'), width=64, height=26, corner_radius=8,
@@ -1949,7 +2128,7 @@ class App(ctk.CTk):
             fg_color=C["surface2"], hover_color=C["border"],
             command=self._open_csv, state="disabled",
         )
-        self._csv_btn.grid(row=0, column=6)
+        self._csv_btn.grid(row=0, column=9)
 
         self._pdf_btn = ctk.CTkButton(
             ar, text=_('btn_pdf'), width=64, height=26, corner_radius=8,
@@ -1957,7 +2136,7 @@ class App(ctk.CTk):
             fg_color=C["surface2"], hover_color=C["border"],
             command=self._open_pdf, state="disabled",
         )
-        self._pdf_btn.grid(row=0, column=7, padx=(4, 0))
+        self._pdf_btn.grid(row=0, column=10, padx=(4, 0))
 
         self._xlsx_btn = ctk.CTkButton(
             ar, text=_('btn_xlsx'), width=72, height=26, corner_radius=8,
@@ -1965,7 +2144,7 @@ class App(ctk.CTk):
             fg_color=C["surface2"], hover_color=C["border"],
             command=self._open_xlsx, state="disabled",
         )
-        self._xlsx_btn.grid(row=0, column=8, padx=(4, 0))
+        self._xlsx_btn.grid(row=0, column=11, padx=(4, 0))
 
         self._ann_btn = ctk.CTkButton(
             ar, text=_('btn_annotate'), width=95, height=26, corner_radius=8,
@@ -1973,13 +2152,44 @@ class App(ctk.CTk):
             fg_color=C["surface2"], hover_color=C["border"],
             command=self._annotate_dxf, state="disabled",
         )
-        self._ann_btn.grid(row=0, column=9, padx=(4, 0))
+        self._ann_btn.grid(row=0, column=12, padx=(4, 0))
+
+        self._out_dir_btn = ctk.CTkButton(
+            ar, text=_('btn_output_folder'), width=82, height=26, corner_radius=8,
+            font=ctk.CTkFont(size=10, weight="bold"),
+            fg_color=C["surface2"], hover_color=C["border"],
+            command=self._open_output_folder, state="disabled",
+        )
+        self._out_dir_btn.grid(row=0, column=13, padx=(4, 0))
 
         ctk.CTkCheckBox(
             ar, text=_('chk_auto_html'), variable=self.auto_open_var,
             font=ctk.CTkFont(size=10), text_color=C["muted"],
             width=90, checkbox_height=14, checkbox_width=14,
-        ).grid(row=0, column=10, padx=(6, 0))
+        ).grid(row=0, column=14, padx=(6, 0))
+
+        mode_row = ctk.CTkFrame(card, fg_color="transparent")
+        mode_row.grid(row=3, column=0, columnspan=7, padx=14, pady=(0, 10), sticky="ew")
+        mode_row.grid_columnconfigure(2, weight=1)
+        ctk.CTkLabel(mode_row, text=_('ux_mode_label'),
+                     font=ctk.CTkFont(size=10, weight="bold"), text_color=C["muted"]
+        ).grid(row=0, column=0, sticky="w", padx=(0, 8))
+        self._ux_mode_var = ctk.StringVar(value=_('ux_mode_basic'))
+        self._ux_mode = ctk.CTkSegmentedButton(
+            mode_row,
+            values=[_('ux_mode_basic'), _('ux_mode_advanced')],
+            variable=self._ux_mode_var,
+            height=24,
+            font=ctk.CTkFont(size=10, weight="bold"),
+            command=lambda _: self._apply_ux_mode(),
+        )
+        self._ux_mode.grid(row=0, column=1, sticky="w")
+        self._ux_hint = ctk.CTkLabel(mode_row,
+                                     text=_('ux_mode_hint_basic'),
+                                     font=ctk.CTkFont(size=10), text_color=C["muted"])
+        self._ux_hint.grid(row=0, column=2, sticky="w", padx=(12, 0))
+
+        self._apply_ux_mode()
 
     @staticmethod
     def _badge(parent, text: str, fg: str, bg: str, col: int) -> ctk.CTkLabel:
@@ -2003,14 +2213,14 @@ class App(ctk.CTk):
         tb.grid(row=0, column=0, padx=12, pady=(10, 6), sticky="ew")
         tb.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(tb, text="Resultados",
+        ctk.CTkLabel(tb, text=_('main_title_results'),
                      font=ctk.CTkFont(size=12, weight="bold"), text_color=C["text"]
         ).grid(row=0, column=0, sticky="w", padx=(0, 12))
 
         self._search_var = ctk.StringVar()
         self._search_var.trace_add("write", self._filter)
         ctk.CTkEntry(tb, textvariable=self._search_var,
-                     placeholder_text="🔎  Filtrar...",
+                     placeholder_text=_('rpt_filter_ph'),
                      width=175, height=26, corner_radius=8,
                      fg_color=C["surface2"], border_color=C["border"],
                      font=ctk.CTkFont(size=11)
@@ -2065,10 +2275,10 @@ class App(ctk.CTk):
         self._ctx.add_command(label="📋  Copiar linha",           command=self._copy_row)
         self._ctx.add_command(label="🔍  Filtrar por esta regra", command=self._filter_by_rule)
         self._ctx.add_separator()
-        self._ctx.add_command(label="🗑️   Limpar filtro",
+        self._ctx.add_command(label=_('main_ctx_clear_filter'),
                                command=lambda: (
                                    self._search_var.set(""),
-                                   self._sev_var.set("Todos"),
+                                   self._sev_var.set(_('rpt_filter_all')),
                                ))
         self.tree.bind("<Button-3>", lambda e: (
             self.tree.selection_set(self.tree.identify_row(e.y)),
@@ -2103,7 +2313,7 @@ class App(ctk.CTk):
 
     def _open_about(self) -> None:
         win = ctk.CTkToplevel(self)
-        win.title("Sobre o DWG Quality Checker")
+        win.title(f"{_('about_title')} · {_('app_name')}")
         win.geometry("420x340")
         win.resizable(False, False)
         win.configure(fg_color=C["bg"])
@@ -2114,7 +2324,7 @@ class App(ctk.CTk):
         ).pack(pady=(28, 4))
 
         # nome + versão
-        ctk.CTkLabel(win, text="DWG Quality Checker",
+        ctk.CTkLabel(win, text=_('app_name'),
                      font=ctk.CTkFont(size=16, weight="bold"), text_color=C["text"]
         ).pack()
         ctk.CTkLabel(win, text=_('about_version', version=VERSION),
@@ -2138,7 +2348,7 @@ class App(ctk.CTk):
         ).pack(pady=(2, 14))
 
         # copyright
-        ctk.CTkLabel(win, text=f"© 2026 {COMPANY}. Todos os direitos reservados.",
+        ctk.CTkLabel(win, text=_('about_rights_reserved', year=2026, company=COMPANY),
                      font=ctk.CTkFont(size=9), text_color=C["border"]
         ).pack()
 
@@ -2149,6 +2359,44 @@ class App(ctk.CTk):
 
     def _open_config(self) -> None:
         ConfigEditorWindow(self)
+
+    def _load_runtime_profiles(self) -> dict:
+        try:
+            if self._PROFILES_FILE.exists():
+                with open(self._PROFILES_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f) or {}
+                if isinstance(data, dict):
+                    return data
+        except Exception as exc:
+            logging.warning("Perfis runtime: falha ao carregar: %s", exc)
+        return {}
+
+    def _selected_profile_names(self) -> list[str]:
+        names: list[str] = []
+        selected = getattr(self, "_run_profile_var", None)
+        if selected is not None:
+            single_name = self._run_profile_var.get().strip()
+            if single_name and single_name != self._BASE_PROFILE_LABEL and single_name in self._profiles_runtime:
+                names.append(single_name)
+
+        multi_var = getattr(self, "_run_profiles_multi_var", None)
+        if multi_var is not None:
+            for part in self._run_profiles_multi_var.get().split(","):
+                name = part.strip()
+                if name and name in self._profiles_runtime and name not in names:
+                    names.append(name)
+        return names
+
+    def _build_checker(self, profile_names: list[str] | None) -> DXFChecker:
+        base_checker = DXFChecker()
+        if not profile_names:
+            return base_checker
+        profile_cfg_list = [self._profiles_runtime.get(name) for name in profile_names]
+        profile_cfg_list = [cfg for cfg in profile_cfg_list if isinstance(cfg, dict)]
+        if not profile_cfg_list:
+            return base_checker
+        merged = merge_profiles_into_config(base_checker.config, profile_cfg_list)
+        return DXFChecker(config_data=merged)
 
     # ── Logic ─────────────────────────────────────────────────────────────────
 
@@ -2191,13 +2439,28 @@ class App(ctk.CTk):
                 [oda, str(dwg.parent), str(out_dir), "ACAD2018", "DXF", "0", "1"],
                 capture_output=True, text=True, timeout=120,
             )
+            # Se o processo falhou, capture stderr/stdout para diagnóstico
+            if result.returncode != 0:
+                self._last_dwg_error = (
+                    f"ODA exited with code {result.returncode}. stderr: {result.stderr.strip()}\n"
+                    f"stdout: {result.stdout.strip()}"
+                )
+                logging.error("ODA: falha na conversão: %s", self._last_dwg_error)
+                return None
+
             # Procura o DXF gerado
             candidates = list(out_dir.glob(f"{dwg.stem}.dxf"))
             if not candidates:
                 candidates = list(out_dir.rglob("*.dxf"))
             if candidates:
                 return str(candidates[0])
+            # Nenhum DXF gerado — registrar saída para diagnóstico
+            self._last_dwg_error = (
+                f"ODA finished but no DXF produced. stdout: {result.stdout.strip()} stderr: {result.stderr.strip()}"
+            )
+            logging.error("ODA: sem DXF gerado: %s", self._last_dwg_error)
         except Exception as exc:
+            self._last_dwg_error = str(exc)
             logging.error("ODA: falha na conversão: %s", exc)
         return None
 
@@ -2214,8 +2477,19 @@ class App(ctk.CTk):
         if p:
             self.file_var.set(p)
             self._file_entry.configure(border_color=C["accent"])
+            self._status_icon.configure(text="📄")
+            self._status_lbl.configure(text=_('main_status_file_selected', file=Path(p).name), text_color=C["muted"])
+            self._footer_lbl.configure(text=_('main_footer_ready_for_verify', file=Path(p).name))
 
     def _run(self) -> None:
+        self._profiles_runtime = self._load_runtime_profiles()
+        if hasattr(self, "_run_profile_menu"):
+            current = self._run_profile_var.get().strip()
+            values = [self._BASE_PROFILE_LABEL, *sorted(self._profiles_runtime.keys())]
+            self._run_profile_menu.configure(values=values)
+            if current not in values:
+                self._run_profile_var.set(self._BASE_PROFILE_LABEL)
+
         fp = self.file_var.get().strip()
         if not fp or not Path(fp).exists():
             messagebox.showwarning(_('dlg_no_file_title'),
@@ -2227,14 +2501,16 @@ class App(ctk.CTk):
             oda = self._find_oda()
             if oda:
                 # ODA instalado — converte automaticamente
-                self.run_btn.configure(state="disabled", text="⏳  Convertendo...")
+                self.run_btn.configure(state="disabled", text=_('btn_converting'))
+                self._set_busy_state(True)
                 self._status_icon.configure(text="⏳")
                 self._status_lbl.configure(
                     text=_('oda_converting', file=Path(fp).name),
                     text_color=C["muted"])
                 self._progress.start()
                 self._footer_lbl.configure(text=_('footer_oda_convert', file=Path(fp).name))
-                threading.Thread(target=self._worker_dwg, args=(fp,), daemon=True).start()
+                profile_names = self._selected_profile_names()
+                threading.Thread(target=self._worker_dwg, args=(fp, profile_names), daemon=True).start()
                 return
             else:
                 # ODA não instalado — instruções de instalação + conversão manual
@@ -2255,38 +2531,42 @@ class App(ctk.CTk):
             _('dlg_large_file_msg', size=size_mb),
         ):
             return
-        self.run_btn.configure(state="disabled", text="⏳  Verificando...")
+        self.run_btn.configure(state="disabled", text=_('btn_verifying'))
+        self._set_busy_state(True)
         self._status_icon.configure(text="⏳")
-        self._status_lbl.configure(text=f"Verificando {Path(fp).name}...",
+        self._status_lbl.configure(text=_('main_status_verifying_file', file=Path(fp).name),
                                    text_color=C["muted"])
         self._progress.start()
-        self._footer_lbl.configure(text=_('footer_oda_convert', file=Path(fp).name) if False else f"Verificando: {Path(fp).name}...")
+        self._footer_lbl.configure(text=_('main_footer_verifying_file', file=Path(fp).name))
         self._ann_btn.configure(state="disabled")
-        threading.Thread(target=self._worker, args=(fp,), daemon=True).start()
+        profile_names = self._selected_profile_names()
+        threading.Thread(target=self._worker, args=(fp, profile_names), daemon=True).start()
 
-    def _worker_dwg(self, dwg_fp: str) -> None:
+    def _worker_dwg(self, dwg_fp: str, profile_names: list[str] | None = None) -> None:
         """Worker para .DWG: converte via ODA e depois processa como DXF."""
         self.after(0, self._footer_lbl.configure,
-                   {"text": f"ODA: convertendo {Path(dwg_fp).name}..."})
+                   {"text": _('footer_oda_convert', file=Path(dwg_fp).name)})
         dxf_fp = self._convert_dwg_to_dxf(dwg_fp)
         if not dxf_fp:
-            self.after(0, self._on_error,
-                       "A conversão .DWG → .DXF falhou.\n\n"
-                       "Verifique se o ODA File Converter está instalado corretamente.\n"
-                       "Ou converta manualmente no AutoCAD: Arquivo → Salvar Como → DXF")
+            msg = _("dwg_convert_failed_msg")
+            err = getattr(self, "_last_dwg_error", None)
+            if err:
+                msg += _('dwg_convert_details', err=str(err))
+            self.after(0, self._on_error, msg)
             return
         self.after(0, self._status_lbl.configure,
-                   {"text": f"Verificando {Path(dxf_fp).name} (convertido)...",
+                   {"text": _('main_status_verifying_converted', file=Path(dxf_fp).name),
                     "text_color": C["muted"]})
-        self._worker(dxf_fp)
+        self._worker(dxf_fp, profile_names)
 
 
 
-    def _worker(self, fp: str) -> None:
+    def _worker(self, fp: str, profile_names: list[str] | None = None) -> None:
         try:
             def _progress(name: str, i: int, total: int) -> None:
                 self.after(0, self._update_progress, name, i, total)
-            result  = DXFChecker().check(fp, progress_cb=_progress)
+            checker = self._build_checker(profile_names)
+            result  = checker.check(fp, progress_cb=_progress)
             out_dir = str(Path(fp).parent)
             base    = str(Path(out_dir) / (Path(fp).stem + "_report"))
             html    = generate_html_report(result, base + ".html")
@@ -2318,6 +2598,7 @@ class App(ctk.CTk):
         self._last_result = result
 
         self.run_btn.configure(state="normal", text=_('btn_verify'))
+        self._set_busy_state(False)
         self._progress.stop()
         self._progress.set(0)
 
@@ -2342,9 +2623,12 @@ class App(ctk.CTk):
         if csv_:  self._csv_btn.configure(state="normal")
         if pdf_:  self._pdf_btn.configure(state="normal")
         if xlsx_: self._xlsx_btn.configure(state="normal")
+        self._out_dir_btn.configure(state="normal")
         # Enable annotate button
         if Path(result["file_path"]).suffix.lower() == ".dxf":
             self._ann_btn.configure(state="normal")
+
+        self._apply_ux_mode()
 
         self._search_var.set("")
         self._sev_var.set(_('rpt_filter_all'))
@@ -2358,48 +2642,49 @@ class App(ctk.CTk):
         sha = result.get("sha256", "")
         sha_short = f"  ·  SHA-256: {sha[:16]}…" if sha else ""
         self._footer_lbl.configure(
-            text=f"Concluído — {result['total_issues']} ocorrência(s)  ·  {result['file']}"
+            text=_('main_footer_completed', total=result['total_issues'], file=result['file'])
                  + (f"  ·  {_meta}" if _meta else "") + sha_short)
 
     def _annotate_dxf(self) -> None:
         """Gera cópia anotada do DXF com _QC_ISSUES layer."""
         result = getattr(self, "_last_result", None)
         if not result:
-            messagebox.showwarning("Anotar DXF", _('annotate_no_result'), parent=self)
+            messagebox.showwarning(_('annotate_title'), _('annotate_no_result'), parent=self)
             return
         fp  = result["file_path"]
         out = str(Path(fp).parent / (Path(fp).stem + "_annotated.dxf"))
         try:
             from checker.annotate import annotate_dxf
             path = annotate_dxf(result, out)
-            messagebox.showinfo("🏷 DXF Anotado",
+            messagebox.showinfo(_('annotate_done_title'),
                                 _('annotate_done', path=path), parent=self)
             os.startfile(str(Path(path).parent))
         except Exception as exc:
             logging.error("annotate_dxf: %s", exc)
-            messagebox.showerror("Erro", _('annotate_error', err=str(exc)), parent=self)
+            messagebox.showerror(_('main_error_title'), _('annotate_error', err=str(exc)), parent=self)
 
     def _on_error(self, err: str, tb: str = "") -> None:
-        self.run_btn.configure(state="normal", text="🔍  Verificar")
+        self.run_btn.configure(state="normal", text=_('btn_verify'))
+        self._set_busy_state(False)
         self._progress.stop()
         self._progress.set(0)
         self._status_icon.configure(text="⚠️")
-        self._status_lbl.configure(text="Erro ao processar", text_color=C["error"])
-        detail = f"\n\nDetalhes salvos em:\n{_LOG_FILE}" if tb else ""
-        messagebox.showerror("Erro", f"Não foi possível processar o arquivo:\n\n{err}{detail}")
+        self._status_lbl.configure(text=_('main_status_error_processing'), text_color=C["error"])
+        detail = _('main_error_detail_saved', log=_LOG_FILE) if tb else ""
+        messagebox.showerror(_('main_error_title'), _('main_error_msg', err=err, detail=detail))
 
     # ── Table helpers ─────────────────────────────────────────────────────────
 
     def _placeholder(self) -> None:
         self.tree.delete(*self.tree.get_children())
         self.tree.insert("", "end",
-                         values=("—", "—", "Nenhum arquivo verificado ainda", "—", "—", "—"))
+                         values=("—", "—", _('main_placeholder_no_file'), "—", "—", "—"))
 
     def _populate(self, issues: list) -> None:
         self.tree.delete(*self.tree.get_children())
         if not issues:
             self.tree.insert("", "end",
-                             values=("—", "—", "🎉  Nenhum problema encontrado!", "—", "—", "—"))
+                             values=("—", "—", _('rpt_no_issues'), "—", "—", "—"))
             return
         for idx, issue in enumerate(issues):
             tags = [issue.severity.value]
@@ -2443,7 +2728,7 @@ class App(ctk.CTk):
         text = "\t".join(str(v) for v in self.tree.item(sel[0], "values"))
         self.clipboard_clear()
         self.clipboard_append(text)
-        self._footer_lbl.configure(text="✅ Linha copiada para a área de transferência")
+        self._footer_lbl.configure(text=_('footer_row_copied'))
 
     def _filter_by_rule(self) -> None:
         sel = self.tree.selection()
@@ -2453,8 +2738,8 @@ class App(ctk.CTk):
     def _update_progress(self, name: str, i: int, total: int) -> None:
         label = name.replace("check_", "").replace("_", " ").title()
         self._status_lbl.configure(
-            text=f"[{i}/{total}] {label}...", text_color=C["muted"])
-        self._footer_lbl.configure(text=f"Regra {i}/{total}: {label}")
+            text=_('main_status_rule_progress', i=i, total=total, label=label), text_color=C["muted"])
+        self._footer_lbl.configure(text=_('main_footer_rule_progress', i=i, total=total, label=label))
 
     # ── Drag & Drop ───────────────────────────────────────────────────────────
 
@@ -2476,7 +2761,7 @@ class App(ctk.CTk):
     def _on_drag_enter(self, event) -> None:  # noqa: ARG002
         """Feedback visual quando arquivo é arrastado sobre a janela."""
         self._file_entry.configure(border_color=C["accent"])
-        self._footer_lbl.configure(text="📂  Solte o arquivo .DXF aqui...")
+        self._footer_lbl.configure(text=_('dnd_drop_hint'))
 
     def _on_drag_leave(self, event) -> None:  # noqa: ARG002
         """Restaura visual quando arrastar sai da janela."""
@@ -2495,23 +2780,23 @@ class App(ctk.CTk):
 
         if not Path(fp).exists():
             messagebox.showwarning(
-                "Arquivo não encontrado", f"Não foi possível acessar:\n{fp}", parent=self)
-            self._footer_lbl.configure(text="Pronto.")
+                _('compare_not_found'), _('dnd_not_found_msg', path=fp), parent=self)
+            self._footer_lbl.configure(text=_('footer_ready'))
             return
 
         ext = Path(fp).suffix.lower()
         if ext not in (".dxf", ".dwg"):
             messagebox.showwarning(
-                "Formato inválido",
-                "Apenas arquivos .DXF e .DWG são suportados.\nSolte um arquivo .dxf ou .dwg.",
+                _('dlg_invalid_fmt_title'),
+                _('dnd_invalid_drop_msg'),
                 parent=self,
             )
-            self._footer_lbl.configure(text="Pronto.")
+            self._footer_lbl.configure(text=_('footer_ready'))
             return
 
         self.file_var.set(fp)
         self._file_entry.configure(border_color=C["accent"])
-        self._footer_lbl.configure(text=f"📂  Arquivo carregado: {Path(fp).name}")
+        self._footer_lbl.configure(text=_('dnd_file_loaded', file=Path(fp).name))
 
     # ── Atalhos de teclado ────────────────────────────────────────────────────
 
@@ -2586,8 +2871,173 @@ class App(ctk.CTk):
         if self._xlsx_path and Path(self._xlsx_path).exists():
             os.startfile(str(Path(self._xlsx_path).resolve()))
 
+    def _open_output_folder(self) -> None:
+        result = getattr(self, "_last_result", None)
+        if not result:
+            return
+        try:
+            os.startfile(str(Path(result["file_path"]).resolve().parent))
+        except Exception:
+            pass
+
+    def _clear_selection(self) -> None:
+        self.file_var.set("")
+        self._file_entry.configure(border_color=C["border"])
+        self._status_icon.configure(text="⏳")
+        self._status_lbl.configure(text=_('main_status_waiting'), text_color=C["muted"])
+        self._footer_lbl.configure(text=_('footer_ready'))
+        self._html_btn.configure(state="disabled")
+        self._csv_btn.configure(state="disabled")
+        self._pdf_btn.configure(state="disabled")
+        self._xlsx_btn.configure(state="disabled")
+        self._ann_btn.configure(state="disabled")
+        self._out_dir_btn.configure(state="disabled")
+        self._all_issues = []
+        self._placeholder()
+        self._apply_ux_mode()
+
+    def _set_busy_state(self, busy: bool) -> None:
+        state = "disabled" if busy else "normal"
+        for btn in [
+            getattr(self, "_btn_open", None),
+            getattr(self, "_btn_batch", None),
+            getattr(self, "_btn_clear", None),
+            getattr(self, "_btn_history", None),
+            getattr(self, "_btn_watch", None),
+            getattr(self, "_btn_compare", None),
+            getattr(self, "_btn_config", None),
+            getattr(self, "_btn_about", None),
+            getattr(self, "_btn_diag", None),
+        ]:
+            if btn is not None:
+                btn.configure(state=state)
+
     def _open_history(self) -> None:
         HistoryWindow(self)
+
+    def _apply_ux_mode(self) -> None:
+        mode = getattr(self, "_ux_mode_var", None)
+        mode_val = mode.get() if mode is not None else _('ux_mode_basic')
+        advanced = (mode_val == _('ux_mode_advanced'))
+
+        if not advanced:
+            self.strict_var.set(False)
+
+        self._strict_chk.configure(state="normal" if advanced else "disabled")
+        self._csv_btn.configure(state=("normal" if (advanced and self._csv_path) else "disabled"))
+        self._pdf_btn.configure(state=("normal" if (advanced and self._pdf_path) else "disabled"))
+        self._xlsx_btn.configure(state=("normal" if (advanced and self._xlsx_path) else "disabled"))
+        self._ann_btn.configure(state=("normal" if (advanced and getattr(self, "_last_result", None)) else "disabled"))
+        self._out_dir_btn.configure(state=("normal" if (advanced and getattr(self, "_last_result", None)) else "disabled"))
+        self._ux_hint.configure(
+            text=(
+                _('ux_mode_hint_basic')
+                if not advanced else
+                _('ux_mode_hint_advanced')
+            )
+        )
+
+    def _collect_diagnostics(self) -> dict:
+        cfg_path = _BASE_DIR / "config.yaml"
+        oda = self._find_oda()
+        template_dir = _BASE_DIR / "templates"
+        di = {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "app_version": VERSION,
+            "python_version": sys.version.split()[0],
+            "python_executable": sys.executable,
+            "platform": platform.platform(),
+            "base_dir": str(_BASE_DIR.resolve()),
+            "cwd": str(Path.cwd().resolve()),
+            "config_path": str(cfg_path.resolve()),
+            "config_exists": cfg_path.exists(),
+            "log_path": str(_LOG_FILE.resolve()),
+            "log_exists": _LOG_FILE.exists(),
+            "templates_dir": str(template_dir.resolve()),
+            "templates_exists": template_dir.exists(),
+            "oda_found": bool(oda),
+            "oda_path": oda or "",
+            "dnd_enabled": bool(_DND_OK),
+        }
+        return di
+
+    def _open_diagnostics(self) -> None:
+        win = ctk.CTkToplevel(self)
+        win.title(_('diag_title'))
+        win.geometry("760x500")
+        win.minsize(680, 420)
+        win.configure(fg_color=C["bg"])
+        win.grab_set()
+
+        root = ctk.CTkFrame(win, fg_color=C["surface"], corner_radius=10)
+        root.pack(fill="both", expand=True, padx=12, pady=12)
+
+        ctk.CTkLabel(root, text=_('diag_header'),
+                     font=ctk.CTkFont(size=14, weight="bold"), text_color=C["text"]
+        ).pack(anchor="w", padx=12, pady=(10, 2))
+        ctk.CTkLabel(root,
+                 text=_('diag_desc'),
+                     font=ctk.CTkFont(size=10), text_color=C["muted"]
+        ).pack(anchor="w", padx=12, pady=(0, 8))
+
+        box = ctk.CTkTextbox(root, fg_color=C["surface2"], border_color=C["border"], border_width=1)
+        box.pack(fill="both", expand=True, padx=12, pady=(0, 10))
+
+        def _render() -> None:
+            d = self._collect_diagnostics()
+            lines = [
+                f"timestamp: {d['timestamp']}",
+                f"app_version: {d['app_version']}",
+                f"python_version: {d['python_version']}",
+                f"python_executable: {d['python_executable']}",
+                f"platform: {d['platform']}",
+                f"base_dir: {d['base_dir']}",
+                f"cwd: {d['cwd']}",
+                f"config_path: {d['config_path']}",
+                f"config_exists: {d['config_exists']}",
+                f"templates_dir: {d['templates_dir']}",
+                f"templates_exists: {d['templates_exists']}",
+                f"log_path: {d['log_path']}",
+                f"log_exists: {d['log_exists']}",
+                f"oda_found: {d['oda_found']}",
+                f"oda_path: {d['oda_path']}",
+                f"dnd_enabled: {d['dnd_enabled']}",
+            ]
+            txt = "\n".join(lines)
+            box.delete("1.0", "end")
+            box.insert("1.0", txt)
+
+        def _copy() -> None:
+            self.clipboard_clear()
+            self.clipboard_append(box.get("1.0", "end").strip())
+            self._footer_lbl.configure(text=_('footer_diag_copied'))
+
+        def _save() -> None:
+            p = filedialog.asksaveasfilename(
+                title=_('diag_save_title'),
+                defaultextension=".txt",
+                filetypes=[("Texto", "*.txt"), ("Todos", "*.*")],
+                initialfile=f"{_('diag_save_filename')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+            )
+            if not p:
+                return
+            try:
+                Path(p).write_text(box.get("1.0", "end").strip(), encoding="utf-8")
+                self._footer_lbl.configure(text=_('footer_diag_saved', name=Path(p).name))
+            except Exception as exc:
+                messagebox.showerror(_('diag_save_error_title'), _('diag_save_error_msg', err=str(exc)), parent=win)
+
+        actions = ctk.CTkFrame(root, fg_color="transparent")
+        actions.pack(fill="x", padx=12, pady=(0, 10))
+        ctk.CTkButton(actions, text=_('diag_btn_refresh'), width=96, height=28, command=_render).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(actions, text=_('diag_btn_copy'), width=86, height=28,
+                      fg_color=C["surface2"], hover_color=C["border"], command=_copy).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(actions, text=_('diag_btn_save'), width=86, height=28,
+                      fg_color=C["surface2"], hover_color=C["border"], command=_save).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(actions, text=_('diag_btn_close'), width=86, height=28,
+                      fg_color=C["surface2"], hover_color=C["border"], command=win.destroy).pack(side="right")
+
+        _render()
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

@@ -5,6 +5,7 @@ sobre um arquivo DXF/DWG, retornando um dicionário de resultados.
 
 from __future__ import annotations
 
+import copy
 import sys
 import time
 from pathlib import Path
@@ -59,15 +60,182 @@ _CONFIG_DEFAULTS: dict = {
 }
 
 
+def _as_bool(value, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in {"1", "true", "yes", "y", "on", "sim", "s"}:
+            return True
+        if v in {"0", "false", "no", "n", "off", "nao", "não"}:
+            return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return default
+
+
+def _as_float(value, default: float) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def _as_str_list(value) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    for item in value:
+        if isinstance(item, str):
+            s = item.strip()
+            if s:
+                out.append(s)
+    return out
+
+
 def _validate_config(cfg: dict) -> dict:
-    """Preenche chaves ausentes com valores-padrão para garantir execução segura."""
+    """Normaliza configuração do usuário para execução resiliente."""
+    if not isinstance(cfg, dict):
+        cfg = {}
+
     for section, defaults in _CONFIG_DEFAULTS.items():
         if not isinstance(cfg.get(section), dict):
             cfg[section] = dict(defaults)
         else:
             for key, val in defaults.items():
                 cfg[section].setdefault(key, val)
+
+    # layers
+    cfg["layers"]["required"] = _as_str_list(cfg["layers"].get("required"))
+    naming = cfg["layers"].get("naming_convention", "")
+    cfg["layers"]["naming_convention"] = naming if isinstance(naming, str) else ""
+
+    # text
+    min_h = _as_float(cfg["text"].get("min_height"), _CONFIG_DEFAULTS["text"]["min_height"])
+    max_h = _as_float(cfg["text"].get("max_height"), _CONFIG_DEFAULTS["text"]["max_height"])
+    if min_h > max_h:
+        min_h, max_h = max_h, min_h
+    cfg["text"]["min_height"] = min_h
+    cfg["text"]["max_height"] = max_h
+
+    # drawing flags
+    for key, default in _CONFIG_DEFAULTS["drawing"].items():
+        cfg["drawing"][key] = _as_bool(cfg["drawing"].get(key), default)
+
+    # rules severity overrides
+    rules = cfg.get("rules")
+    if not isinstance(rules, dict):
+        rules = {}
+    sev = rules.get("severity_overrides")
+    normalized: dict[str, str] = {}
+    if isinstance(sev, dict):
+        for rule_name, severity in sev.items():
+            if not isinstance(rule_name, str):
+                continue
+            if not isinstance(severity, str):
+                continue
+            sev_u = severity.strip().upper()
+            if sev_u in {"ERROR", "WARNING", "INFO"}:
+                normalized[rule_name.strip()] = sev_u
+    rules["severity_overrides"] = normalized
+    cfg["rules"] = rules
+
     return cfg
+
+
+def _normalize_profile_overrides(profile_cfg: dict) -> dict:
+    """Normaliza um perfil parcial sem forçar defaults em seções ausentes."""
+    if not isinstance(profile_cfg, dict):
+        return {}
+
+    out: dict = {}
+
+    layers = profile_cfg.get("layers")
+    if isinstance(layers, dict):
+        layer_out: dict = {}
+        if "required" in layers:
+            layer_out["required"] = _as_str_list(layers.get("required"))
+        if "naming_convention" in layers:
+            naming = layers.get("naming_convention", "")
+            layer_out["naming_convention"] = naming if isinstance(naming, str) else ""
+        if layer_out:
+            out["layers"] = layer_out
+
+    text = profile_cfg.get("text")
+    if isinstance(text, dict):
+        text_out: dict = {}
+        if "min_height" in text:
+            text_out["min_height"] = _as_float(text.get("min_height"), _CONFIG_DEFAULTS["text"]["min_height"])
+        if "max_height" in text:
+            text_out["max_height"] = _as_float(text.get("max_height"), _CONFIG_DEFAULTS["text"]["max_height"])
+        if "min_height" in text_out and "max_height" in text_out and text_out["min_height"] > text_out["max_height"]:
+            text_out["min_height"], text_out["max_height"] = text_out["max_height"], text_out["min_height"]
+        if text_out:
+            out["text"] = text_out
+
+    drawing = profile_cfg.get("drawing")
+    if isinstance(drawing, dict):
+        draw_out: dict = {}
+        for key, default in _CONFIG_DEFAULTS["drawing"].items():
+            if key in drawing:
+                draw_out[key] = _as_bool(drawing.get(key), default)
+        if draw_out:
+            out["drawing"] = draw_out
+
+    rules = profile_cfg.get("rules")
+    if isinstance(rules, dict) and "severity_overrides" in rules:
+        sev = rules.get("severity_overrides")
+        normalized: dict[str, str] = {}
+        if isinstance(sev, dict):
+            for rule_name, severity in sev.items():
+                if not isinstance(rule_name, str) or not isinstance(severity, str):
+                    continue
+                sev_u = severity.strip().upper()
+                if sev_u in {"ERROR", "WARNING", "INFO"}:
+                    normalized[rule_name.strip()] = sev_u
+        out["rules"] = {"severity_overrides": normalized}
+
+    return out
+
+
+def merge_profile_into_config(base_cfg: dict, profile_cfg: dict) -> dict:
+    """Aplica overrides de perfil sobre uma configuração base normalizada."""
+    merged = _validate_config(copy.deepcopy(base_cfg) if isinstance(base_cfg, dict) else {})
+    overrides = _normalize_profile_overrides(profile_cfg)
+
+    if "layers" in overrides:
+        merged.setdefault("layers", {}).update(overrides["layers"])
+
+    if "text" in overrides:
+        merged.setdefault("text", {}).update(overrides["text"])
+        min_h = _as_float(merged["text"].get("min_height"), _CONFIG_DEFAULTS["text"]["min_height"])
+        max_h = _as_float(merged["text"].get("max_height"), _CONFIG_DEFAULTS["text"]["max_height"])
+        if min_h > max_h:
+            min_h, max_h = max_h, min_h
+        merged["text"]["min_height"] = min_h
+        merged["text"]["max_height"] = max_h
+
+    if "drawing" in overrides:
+        merged.setdefault("drawing", {}).update(overrides["drawing"])
+
+    if "rules" in overrides:
+        merged.setdefault("rules", {})
+        merged["rules"]["severity_overrides"] = overrides["rules"]["severity_overrides"]
+
+    return merged
+
+
+def merge_profiles_into_config(base_cfg: dict, profile_cfg_list: list[dict]) -> dict:
+    """Aplica múltiplos perfis em sequência sobre uma configuração base."""
+    merged = _validate_config(copy.deepcopy(base_cfg) if isinstance(base_cfg, dict) else {})
+    if not isinstance(profile_cfg_list, list):
+        return merged
+
+    for profile_cfg in profile_cfg_list:
+        if not isinstance(profile_cfg, dict):
+            continue
+        merged = merge_profile_into_config(merged, profile_cfg)
+    return merged
 
 
 # ── Geometry extractor ────────────────────────────────────────────────────────
@@ -225,19 +393,22 @@ class DXFChecker:
         print(f"Aprovado: {result['passed']}")
     """
 
-    def __init__(self, config_path: Optional[str] = None) -> None:
-        path = Path(config_path) if config_path else DEFAULT_CONFIG
-
-        if not path.exists():
-            self.config: dict = {}          # config ausente — usa padrões
+    def __init__(self, config_path: Optional[str] = None, config_data: Optional[dict] = None) -> None:
+        if isinstance(config_data, dict):
+            self.config = _validate_config(copy.deepcopy(config_data))
         else:
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    self.config = yaml.safe_load(f) or {}
-            except Exception:
-                self.config = {}            # YAML inválido — usa padrões
+            path = Path(config_path) if config_path else DEFAULT_CONFIG
 
-        self.config = _validate_config(self.config)
+            if not path.exists():
+                self.config = {}          # config ausente — usa padrões
+            else:
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        self.config = yaml.safe_load(f) or {}
+                except Exception:
+                    self.config = {}      # YAML inválido — usa padrões
+
+            self.config = _validate_config(self.config)
         self.rules  = get_all_rules()
 
     # ------------------------------------------------------------------
@@ -335,7 +506,7 @@ class DXFChecker:
             for iss in issues:
                 if iss.rule in sev_overrides:
                     try:
-                        iss.severity = Severity(sev_overrides[iss.rule])
+                        iss.severity = Severity(str(sev_overrides[iss.rule]).upper())
                     except ValueError:
                         pass
         return {

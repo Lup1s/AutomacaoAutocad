@@ -1,4 +1,6 @@
 """DWG/DXF Quality Checker"""
 
-__version__ = "1.0.0"
-__author__ = "Your Name"
+from .version import APP_VERSION, AUTHOR
+
+__version__ = APP_VERSION
+__author__ = AUTHOR

@@ -1,154 +1,198 @@
 # 🏗️ DWG Quality Checker
 
-> Automated quality checker for DXF/DWG CAD files — validates layer standards,
-> text heights, block definitions and more. **No AutoCAD license required.**
+Verificador de qualidade para arquivos **DXF/DWG** com foco em padronização técnica, diagnóstico de erros e relatórios acionáveis.
 
-[![CI](https://github.com/yourusername/dwg-quality-checker/actions/workflows/ci.yml/badge.svg)](https://github.com/yourusername/dwg-quality-checker/actions)
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+## Principais recursos
 
----
-
-## ✨ Features
-
-| Check | Severity | Description |
-|-------|----------|-------------|
-| Required layers | ❌ ERROR | Ensures mandatory layers are present |
-| Entities on Layer 0 | ⚠️ WARNING | Detects bad practice of drawing on layer 0 |
-| Frozen layers with entities | ⚠️ WARNING | Finds entities hidden by frozen layers |
-| Off layers with entities | ℹ️ INFO | Entities on turned-off layers |
-| Empty layers | ℹ️ INFO | Layer definitions without any entities |
-| Layer naming convention | ⚠️ WARNING | Validates names against a regex pattern |
-| Text height range | ⚠️ WARNING | Flags texts outside defined min/max height |
-| Unused block definitions | ℹ️ INFO | Block definitions never inserted in model space |
+- Verificação automática por regras (layers, textos, blocos, XREF, duplicatas, viewport, plot styles etc.)
+- Interface desktop (GUI) com:
+  - verificação individual
+  - lote
+  - histórico
+  - watch folder
+  - comparação entre revisões
+- Relatórios em **HTML, CSV, PDF, XLSX**
+- Dashboard HTML de lote
+- Anotação DXF com layer `_QC_ISSUES`
+- CLI para automação/CI
 
 ---
 
-## 🚀 Quick Start
+## Requisitos
+
+- Python 3.10+
+- Windows (GUI otimizada para Windows)
+
+Instalação de dependências:
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/yourusername/dwg-quality-checker.git
-cd dwg-quality-checker
-
-# 2. Install dependencies (no AutoCAD needed!)
 pip install -r requirements.txt
-
-# 3. Generate a sample DXF with intentional issues
-python samples/generate_sample.py
-
-# 4. Run the checker
-python main.py samples/sample_with_issues.dxf
 ```
 
 ---
 
-## 📖 Usage
+## Como executar
 
-```
-python main.py <file.dxf> [options]
-
-positional arguments:
-  file                        Path to DXF/DWG file
-
-options:
-  -o, --output {console,html,csv,all}   Output format (default: console)
-  -f, --output-file NAME                Base name for the output file
-  -c, --config FILE                     Custom YAML configuration file
-      --strict                          Exit code 1 if any ERRORs found (CI/CD)
-```
-
-### Examples
+### GUI (recomendado)
 
 ```bash
-# Console output (default)
-python main.py planta.dxf
+python launcher.py
+```
 
-# Generate HTML report
-python main.py planta.dxf --output html
+### CLI oficial
 
-# Generate HTML + CSV
-python main.py planta.dxf --output all --output-file reports/planta_report
+Opção 1:
 
-# Use custom config and fail the pipeline on errors
-python main.py planta.dxf --config standards/company_rules.yaml --strict
+```bash
+python launcher.py --cli arquivo.dxf
+```
+
+Opção 2:
+
+```bash
+python -m checker.cli arquivo.dxf
+```
+
+> `main.py` foi mantido por compatibilidade e delega para `checker.cli`.
+
+---
+
+## CLI — exemplos
+
+```bash
+# Verificação simples (gera HTML por padrão)
+python launcher.py --cli samples/sample_with_issues.dxf
+
+# Gerar todos os formatos de relatório
+python launcher.py --cli samples/sample_with_issues.dxf --output all
+
+# Pasta de saída customizada
+python launcher.py --cli samples/sample_with_issues.dxf --out-dir ./reports
+
+# Gerar DXF anotado
+python launcher.py --cli samples/sample_with_issues.dxf --annotate
+
+# Saída JSON para automação
+python launcher.py --cli samples/sample_with_issues.dxf --json
+
+# Aplicar perfil de norma/disciplina (ex.: elétrica)
+python launcher.py --cli samples/sample_with_issues.dxf --profile NBR_5410
+
+# Aplicar múltiplas NBRs no mesmo arquivo (repita --profile ou use vírgula)
+python launcher.py --cli samples/sample_with_issues.dxf --profile NBR_5410 --profile NBR_9050
+python launcher.py --cli samples/sample_with_issues.dxf --profile NBR_5410,NBR_9050
+
+# Arquivo de perfis customizado
+python launcher.py --cli samples/sample_with_issues.dxf --profile NBR_5410 --profiles-file ./config_profiles.json
+
+# Timeout por arquivo (robustez em lote)
+python launcher.py --cli samples/sample_with_issues.dxf --timeout-seconds 30
+
+# Log estruturado JSONL por execução
+python launcher.py --cli samples/sample_with_issues.dxf --json-log ./logs/run.jsonl
+
+# Resumo agregado da execução em JSON
+python launcher.py --cli samples/sample_with_issues.dxf --summary-json ./logs/summary.json
+
+# Desativar cache por conteúdo (SHA-256)
+python launcher.py --cli samples/sample_with_issues.dxf --no-cache
+```
+
+Códigos de saída:
+- `0`: sem falhas críticas
+- `1`: houve arquivo com erro/falha
+
+---
+
+## Testes
+
+Executar suíte unitária:
+
+```bash
+python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
 ---
 
-## ⚙️ Configuration
+## Build e release (Windows)
 
-Edit `config.yaml` to match your office standards:
+1) Sincronizar metadados de versão:
 
-```yaml
-layers:
-  required:
-    - "TEXTO"
-    - "COTA"
-    - "HACHURA"
-  naming_convention: "^[A-Z]{2,4}-[A-Z0-9_-]+$"   # e.g. ARQ-PAREDE
-
-text:
-  min_height: 1.5
-  max_height: 10.0
-
-drawing:
-  check_entities_on_layer_0: true
-  check_unused_blocks: true
-  check_empty_layers: true
-  check_frozen_layers: true
-  check_off_layers: true
+```bash
+python build/sync_version_metadata.py --check
 ```
+
+2) Gerar executável (`dist/DWGQualityChecker`):
+
+```bash
+build\build.bat
+```
+
+3) Gerar instalador (`dist_installer`):
+- Abrir [build/installer.iss](build/installer.iss) no Inno Setup.
+- Compilar (F9).
 
 ---
 
-## 📂 Project Structure
+## Estrutura do projeto
 
-```
+```text
 dwg-quality-checker/
 ├── checker/
-│   ├── __init__.py
-│   ├── core.py          # DXFChecker class — orchestrates all rules
-│   ├── rules.py         # All checking rules (easily extensible)
-│   └── report.py        # Report generators: console, HTML, CSV
+│   ├── core.py        # Orquestra leitura + execução de regras
+│   ├── rules.py       # Regras de validação
+│   ├── report.py      # Geração de relatórios (HTML/CSV/PDF/XLSX/dashboard)
+│   ├── annotate.py    # Anotação DXF (_QC_ISSUES)
+│   ├── cli.py         # CLI oficial
+│   └── version.py     # Versão e metadados (fonte única)
 ├── templates/
-│   └── report.html      # Jinja2 HTML report template
-├── samples/
-│   └── generate_sample.py   # Creates a sample DXF with intentional issues
-├── .github/
-│   └── workflows/
-│       └── ci.yml       # GitHub Actions — runs checker on every push
-├── main.py              # CLI entry point
-├── config.yaml          # Rules configuration
+│   └── report.html    # Template do relatório interativo
+├── launcher.py        # Aplicação GUI
+├── main.py            # Entrypoint de compatibilidade (delegação para CLI)
+├── config.yaml        # Configurações das regras
+├── build/             # Scripts e metadados de empacotamento
+├── tests/             # Suíte de testes unitários
 └── requirements.txt
 ```
 
 ---
 
-## 🛠️ Tech Stack
+## Configuração
 
-| Library | Purpose |
-|---------|---------|
-| [ezdxf](https://ezdxf.readthedocs.io/) | Read DXF/DWG files — no AutoCAD required |
-| [Rich](https://rich.readthedocs.io/) | Beautiful terminal output with tables |
-| [Jinja2](https://jinja.palletsprojects.com/) | HTML report templating |
-| [PyYAML](https://pyyaml.org/) | YAML configuration parsing |
+Edite `config.yaml` para adequar padrões da equipe (layers obrigatórias, regex de nomenclatura, limites de texto, regras habilitadas e overrides de severidade).
 
----
+Para variações por disciplina/norma, utilize perfis em `config_profiles.json` e selecione o perfil na GUI ou via CLI (`--profile`).
 
-## 🤝 Adding Custom Rules
+Exemplo (trecho):
 
-Every rule is a plain Python function — just add it to `checker/rules.py` and register it in `get_all_rules()`:
+```yaml
+layers:
+  required: ["TEXTO", "COTA", "EIXO"]
+  naming_convention: "^[A-Z]{2,8}(-[A-Z0-9_-]+)?$"
 
-```python
-def check_my_rule(doc: ezdxf.document.Drawing, config: dict) -> List[Issue]:
-    issues = []
-    # ... your logic here ...
-    return issues
+text:
+  min_height: 0.5
+  max_height: 20.0
+
+drawing:
+  check_entities_on_layer_0: true
+  check_duplicates: true
+  check_xrefs: true
+
+rules:
+  severity_overrides:
+    DUPLICATE_ENTITIES: ERROR
+    EXTERNAL_FONT: WARNING
 ```
 
 ---
 
-## 📄 License
+## Versão
 
-MIT License — see [LICENSE](LICENSE) for details.
+Versão atual: **2.6.0**
+
+---
+
+## Licença
+
+Uso interno / distribuição conforme estratégia do projeto.

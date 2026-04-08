@@ -1,0 +1,210 @@
+{
+  "ARQUITETURA_NBR_6492": {
+    "meta": {
+      "discipline": "Arquitetura",
+      "standards": ["NBR 6492"],
+      "version": "2021",
+      "notes": "Perfil inicial. Ajustar conforme padrão interno da empresa."
+    },
+    "layers": {
+      "required": ["TEXTO", "COTA", "PAREDE", "JANELA", "PORTA", "EIXO"],
+      "naming_convention": "^[A-Z]{2,8}(-[A-Z0-9_-]+)?$"
+    },
+    "text": {
+      "min_height": 1.5,
+      "max_height": 10.0
+    },
+    "drawing": {
+      "check_entities_on_layer_0": true,
+      "check_unused_blocks": true,
+      "check_empty_layers": true,
+      "check_frozen_layers": true,
+      "check_off_layers": false,
+      "check_color_bylayer": true,
+      "check_linetype_bylayer": true,
+      "check_duplicates": true,
+      "check_xrefs": true
+    }
+  },
+  "TOPOGRAFIA_BASE": {
+    "meta": {
+      "discipline": "Topografia",
+      "standards": [],
+      "notes": "Perfil base para levantamentos topográficos."
+    },
+    "layers": {
+      "required": ["CURVA_MESTRE", "CURVA_SECUND", "PONTO_COTADO", "LIMITE"],
+      "naming_convention": ""
+    },
+    "text": {
+      "min_height": 0.5,
+      "max_height": 20.0
+    },
+    "drawing": {
+      "check_entities_on_layer_0": true,
+      "check_unused_blocks": false,
+      "check_empty_layers": false,
+      "check_frozen_layers": true,
+      "check_off_layers": false,
+      "check_color_bylayer": false,
+      "check_linetype_bylayer": false,
+      "check_duplicates": false,
+      "check_xrefs": false
+    }
+  },
+  "ESTRUTURAL_BASE": {
+    "meta": {
+      "discipline": "Estrutural",
+      "standards": [],
+      "notes": "Perfil base para projetos estruturais."
+    },
+    "layers": {
+      "required": ["VIGA", "PILAR", "LAJE", "FUNDACAO", "EIXO", "COTA"],
+      "naming_convention": "^[A-Z]{2,6}(-[A-Z0-9_-]+)?$"
+    },
+    "text": {
+      "min_height": 0.1,
+      "max_height": 5.0
+    },
+    "drawing": {
+      "check_entities_on_layer_0": true,
+      "check_unused_blocks": true,
+      "check_empty_layers": true,
+      "check_frozen_layers": true,
+      "check_off_layers": true,
+      "check_color_bylayer": true,
+      "check_linetype_bylayer": true,
+      "check_duplicates": true,
+      "check_xrefs": true
+    }
+  },
+  "ELETRICA_NBR_5410": {
+    "meta": {
+      "discipline": "Instalações Elétricas",
+      "standards": ["NBR 5410"],
+      "version": "2004 (Confirmada 2023)",
+      "notes": "Perfil inicial para elétrica. Revisar camadas e critérios conforme seu caderno técnico."
+    },
+    "layers": {
+      "required": ["ELETRICA", "ELE_CONDUTO", "ELE_ELETRODUTO", "ELE_LUMINARIA", "ELE_QUADRO", "TEXTO", "COTA"],
+      "naming_convention": "^[A-Z0-9_]{3,30}$"
+    },
+    "text": {
+      "min_height": 1.5,
+      "max_height": 10.0
+    },
+    "drawing": {
+      "check_entities_on_layer_0": true,
+      "check_unused_blocks": true,
+      "check_empty_layers": false,
+      "check_frozen_layers": true,
+      "check_off_layers": false,
+      "check_color_bylayer": true,
+      "check_linetype_bylayer": true,
+      "check_duplicates": true,
+      "check_xrefs": true
+    },
+    "rules": {
+      "severity_overrides": {
+        "MISSING_LAYER": "ERROR",
+        "ENTITIES_ON_LAYER_0": "WARNING"
+      }
+    }
+  },
+  "HIDROSSANITARIO_NBR_5626_8160": {
+    "meta": {
+      "discipline": "Instalações Hidrossanitárias",
+      "standards": ["NBR 5626", "NBR 8160"],
+      "version": "NBR 5626: 2020; NBR 8160: 1999 (Confirmada 2023)",
+      "notes": "Perfil inicial para hidráulica/esgoto."
+    },
+    "layers": {
+      "required": ["HID_AGUA_FRIA", "HID_AGUA_QUENTE", "HID_ESGOTO", "HID_VENT", "TEXTO", "COTA"],
+      "naming_convention": "^[A-Z0-9_]{3,30}$"
+    },
+    "text": {
+      "min_height": 1.5,
+      "max_height": 10.0
+    },
+    "drawing": {
+      "check_entities_on_layer_0": true,
+      "check_unused_blocks": true,
+      "check_empty_layers": false,
+      "check_frozen_layers": true,
+      "check_off_layers": false,
+      "check_color_bylayer": true,
+      "check_linetype_bylayer": true,
+      "check_duplicates": true,
+      "check_xrefs": true
+    },
+    "rules": {
+      "severity_overrides": {
+        "MISSING_LAYER": "ERROR"
+      }
+    }
+  },
+  "SPDA_NBR_5419": {
+    "meta": {
+      "discipline": "SPDA",
+      "standards": ["NBR 5419"],
+      "version": "2015 (Confirmada 2024)",
+      "notes": "Perfil inicial para SPDA."
+    },
+    "layers": {
+      "required": ["SPDA_CAPTACAO", "SPDA_DESCIDA", "SPDA_ATERR", "SPDA_EQPOT", "TEXTO", "COTA"],
+      "naming_convention": "^[A-Z0-9_]{3,30}$"
+    },
+    "text": {
+      "min_height": 1.5,
+      "max_height": 10.0
+    },
+    "drawing": {
+      "check_entities_on_layer_0": true,
+      "check_unused_blocks": true,
+      "check_empty_layers": false,
+      "check_frozen_layers": true,
+      "check_off_layers": false,
+      "check_color_bylayer": true,
+      "check_linetype_bylayer": true,
+      "check_duplicates": true,
+      "check_xrefs": true
+    }
+  },
+  "NBR_15575": {"meta": {"discipline": "Desempenho habitacional", "standards": ["NBR 15575"], "version": "2021 (c/ ajustes 2026)"}, "layers": {"required": ["TEXTO", "COTA", "ARQ", "DETALHE"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 12.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": true, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_6118": {"meta": {"discipline": "Estruturas de concreto", "standards": ["NBR 6118"], "version": "2023 (Emenda 2026)"}, "layers": {"required": ["ESTR_VIGA", "ESTR_PILAR", "ESTR_LAJE", "ESTR_ARM", "EIXO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 0.1, "max_height": 6.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": true, "check_frozen_layers": true, "check_off_layers": true, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_6122": {"meta": {"discipline": "Fundações", "standards": ["NBR 6122"], "version": "2022"}, "layers": {"required": ["ESTR_FUND", "ESTR_SAPATA", "ESTR_ESTACA", "ESTR_BLOCO", "EIXO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 0.1, "max_height": 6.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": true, "check_frozen_layers": true, "check_off_layers": true, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_8800": {"meta": {"discipline": "Estruturas de aço e mistas", "standards": ["NBR 8800"], "version": "2024"}, "layers": {"required": ["ESTR_ACO", "ESTR_LIGACAO", "ESTR_PARAFUSO", "ESTR_CHAPA", "EIXO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 0.1, "max_height": 6.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": true, "check_frozen_layers": true, "check_off_layers": true, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_6120": {"meta": {"discipline": "Ações estruturais", "standards": ["NBR 6120"], "version": "2019"}, "layers": {"required": ["ESTR_ACAO", "ESTR_CARGA", "ESTR_DIAGRAMA", "TEXTO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 0.1, "max_height": 8.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": false, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_5410": {"meta": {"discipline": "Instalações elétricas BT", "standards": ["NBR 5410"], "version": "2004 (Confirmada 2023)"}, "layers": {"required": ["ELETRICA", "ELE_CIRCUITO", "ELE_QUADRO", "ELE_ILUMINACAO", "TEXTO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 10.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": false, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_5626": {"meta": {"discipline": "Água fria e quente", "standards": ["NBR 5626"], "version": "2020"}, "layers": {"required": ["HID_AGUA_FRIA", "HID_AGUA_QUENTE", "HID_RESERV", "HID_BARRILETE", "TEXTO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 10.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": false, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_8160": {"meta": {"discipline": "Esgoto sanitário", "standards": ["NBR 8160"], "version": "1999 (Confirmada 2023)"}, "layers": {"required": ["HID_ESGOTO", "HID_VENT", "HID_CAIXA", "HID_COLETOR", "TEXTO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 10.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": false, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_9050": {"meta": {"discipline": "Acessibilidade", "standards": ["NBR 9050"], "version": "2020 (Emenda 2023)"}, "layers": {"required": ["ACESSO_RAMPA", "ACESSO_CORRIMAO", "ACESSO_SANIT", "ACESSO_CIRC", "TEXTO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 10.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": true, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_12721": {"meta": {"discipline": "Custos de construção", "standards": ["NBR 12721"]}, "layers": {"required": ["TEXTO", "COTA", "QUADRO", "TABELA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 12.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": true, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_16280": {"meta": {"discipline": "Gestão de reformas", "standards": ["NBR 16280"], "version": "2020"}, "layers": {"required": ["DEMOLIR", "CONSTRUIR", "EXISTENTE", "TEXTO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 12.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": true, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_15965": {"meta": {"discipline": "Classificação BIM", "standards": ["NBR 15965"], "version": "2024 (Várias partes)"}, "layers": {"required": ["BIM_CLASS", "BIM_TAG", "BIM_CODIGO", "TEXTO"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 12.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": true, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_ISO_10628": {"meta": {"discipline": "Diagramas de processo", "standards": ["NBR ISO 10628"]}, "layers": {"required": ["PROC_EQUIP", "PROC_TUB", "PROC_INSTR", "PROC_FLUXO", "TEXTO"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 12.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": false, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_13531": {"meta": {"discipline": "Elaboração de projetos", "standards": ["NBR 13531"]}, "layers": {"required": ["TEXTO", "COTA", "QUADRO", "LEGENDA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 12.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": true, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_6123": {"meta": {"discipline": "Ações de vento", "standards": ["NBR 6123"]}, "layers": {"required": ["ESTR_VENTO", "ESTR_CARGA", "ESTR_DIAGRAMA", "TEXTO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 0.1, "max_height": 8.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": false, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_7190": {"meta": {"discipline": "Estruturas de madeira", "standards": ["NBR 7190"]}, "layers": {"required": ["ESTR_MADEIRA", "ESTR_LIGACAO", "ESTR_CORTE", "EIXO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 0.1, "max_height": 8.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": true, "check_frozen_layers": true, "check_off_layers": true, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_15200": {"meta": {"discipline": "Concreto em incêndio", "standards": ["NBR 15200"]}, "layers": {"required": ["ESTR_CONCRETO", "INC_RESFOGO", "EIXO", "COTA", "TEXTO"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 0.1, "max_height": 8.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": true, "check_frozen_layers": true, "check_off_layers": true, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_15961": {"meta": {"discipline": "Alvenaria estrutural", "standards": ["NBR 15961"]}, "layers": {"required": ["ESTR_ALV", "ESTR_BLOCO", "ESTR_GRAUTE", "EIXO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 0.1, "max_height": 8.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": true, "check_frozen_layers": true, "check_off_layers": true, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_10844": {"meta": {"discipline": "Águas pluviais", "standards": ["NBR 10844"]}, "layers": {"required": ["HID_PLUVIAL", "HID_CALHA", "HID_RALO", "HID_DESCIDA", "TEXTO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 10.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": false, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_13932": {"meta": {"discipline": "GLP interno", "standards": ["NBR 13932"]}, "layers": {"required": ["GAS_GLP", "GAS_TUB", "GAS_ABRIGO", "GAS_SEG", "TEXTO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 10.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": false, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_15526": {"meta": {"discipline": "Gases combustíveis", "standards": ["NBR 15526"]}, "layers": {"required": ["GAS_COMB", "GAS_TUB", "GAS_MEDIDOR", "GAS_SEG", "TEXTO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 10.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": false, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_15358": {"meta": {"discipline": "Gás natural interno", "standards": ["NBR 15358"]}, "layers": {"required": ["GAS_GN", "GAS_TUB", "GAS_REGUL", "GAS_MEDIDOR", "TEXTO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 10.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": false, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_13532": {"meta": {"discipline": "Projetos de arquitetura", "standards": ["NBR 13532"], "version": "1995 (Confirmada 2023)"}, "layers": {"required": ["TEXTO", "COTA", "PAREDE", "PORTA", "JANELA", "EIXO"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 10.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": true, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_10898": {"meta": {"discipline": "Iluminação de emergência", "standards": ["NBR 10898"]}, "layers": {"required": ["ELE_ILUM_EMERG", "INC_SINAL", "INC_ROTA", "TEXTO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 10.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": false, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_9077": {"meta": {"discipline": "Saídas de emergência", "standards": ["NBR 9077"]}, "layers": {"required": ["INC_ROTA", "INC_SAIDA", "INC_PORTA_CF", "TEXTO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 10.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": false, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_13714": {"meta": {"discipline": "Hidrantes e mangotinhos", "standards": ["NBR 13714"]}, "layers": {"required": ["INC_HIDRANTE", "INC_RESERV", "INC_TUB", "TEXTO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 10.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": false, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_17240": {"meta": {"discipline": "Detecção/alarme de incêndio", "standards": ["NBR 17240"]}, "layers": {"required": ["INC_DETECCAO", "INC_ALARME", "INC_CENTRAL", "INC_CABO", "TEXTO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 10.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": false, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_10151": {"meta": {"discipline": "Acústica externa", "standards": ["NBR 10151"], "version": "2019 (Emenda 2023)"}, "layers": {"required": ["ACUS_MEDICAO", "ACUS_FONTE", "ACUS_LIMITE", "TEXTO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 10.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": true, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_10152": {"meta": {"discipline": "Acústica interna", "standards": ["NBR 10152"], "version": "2017"}, "layers": {"required": ["ACUS_AMBIENTE", "ACUS_NIVEL", "ACUS_FONTE", "TEXTO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 10.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": true, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_16537": {"meta": {"discipline": "Sinalização tátil", "standards": ["NBR 16537"], "version": "2024"}, "layers": {"required": ["ACESSO_TATIL", "ACESSO_ALERTA", "ACESSO_DIREC", "TEXTO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 10.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": true, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_14022": {"meta": {"discipline": "Acessibilidade em transporte", "standards": ["NBR 14022"]}, "layers": {"required": ["TRANSP_ACESSO", "TRANSP_PLAT", "TRANSP_SINAL", "TEXTO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 10.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": true, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_12266": {"meta": {"discipline": "Valas para tubulação", "standards": ["NBR 12266"]}, "layers": {"required": ["INFRA_VALA", "INFRA_TUB", "INFRA_REATERRO", "TEXTO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 0.5, "max_height": 10.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": false, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_15595": {"meta": {"discipline": "Acesso veicular PcD", "standards": ["NBR 15595"]}, "layers": {"required": ["ACESSO_VEICULO", "ACESSO_VAGA_PCD", "ACESSO_RAMPA", "TEXTO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 10.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": true, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_9283": {"meta": {"discipline": "Mobiliário urbano", "standards": ["NBR 9283"]}, "layers": {"required": ["URB_MOBILIARIO", "URB_IMPLANT", "URB_DETALHE", "TEXTO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 10.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": true, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_14644": {"meta": {"discipline": "Sinalização vertical", "standards": ["NBR 14644"]}, "layers": {"required": ["URB_SINAL_VERT", "URB_POSTE", "URB_PLACA", "TEXTO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 10.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": true, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_15486": {"meta": {"discipline": "Contenção viária", "standards": ["NBR 15486"]}, "layers": {"required": ["URB_CONTENCAO", "URB_GUARDA", "URB_VIAS", "TEXTO", "COTA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 10.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": true, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}},
+  "NBR_12722": {"meta": {"discipline": "Serviços técnicos de engenharia civil", "standards": ["NBR 12722"]}, "layers": {"required": ["TEXTO", "COTA", "QUADRO", "LEGENDA"], "naming_convention": "^[A-Z0-9_-]{2,40}$"}, "text": {"min_height": 1.5, "max_height": 12.0}, "drawing": {"check_entities_on_layer_0": true, "check_unused_blocks": true, "check_empty_layers": true, "check_frozen_layers": true, "check_off_layers": false, "check_color_bylayer": true, "check_linetype_bylayer": true, "check_duplicates": true, "check_xrefs": true}}
+}

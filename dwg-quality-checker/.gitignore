@@ -6,6 +6,8 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+build_tmp/
+dist_installer/
 .venv/
 venv/
 env/
@@ -18,6 +20,9 @@ env/
 # Reports gerados
 *.html
 *.csv
+*.pdf
+*.xlsx
+*.log
 
 # DXF de exemplo gerado
 samples/sample_with_issues.dxf

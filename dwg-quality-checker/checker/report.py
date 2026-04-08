@@ -5,12 +5,295 @@ Geradores de relatório: console (rich), HTML (jinja2), CSV, PDF e XLSX.
 from __future__ import annotations
 
 import csv
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Dict
 
-from .i18n import _, get_tr_dict
+from .i18n import _, get_active_lang, get_tr_dict
 from .rules import Severity
+from .version import APP_VERSION
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Explainability metadata for report precision
+# ─────────────────────────────────────────────────────────────────────────────
+
+_RULE_EXPLAIN_SLUG: dict[str, str] = {
+    "REQUIRED_LAYER_MISSING": "required_layer_missing",
+    "ENTITIES_ON_LAYER_0": "entities_on_layer_0",
+    "ENTITIES_ON_FROZEN_LAYER": "entities_on_frozen_layer",
+    "ENTITIES_ON_OFF_LAYER": "entities_on_off_layer",
+    "EMPTY_LAYERS": "empty_layers",
+    "LAYER_NAMING_CONVENTION": "layer_naming_convention",
+    "TEXT_HEIGHT_OUT_OF_RANGE": "text_height_out_of_range",
+    "UNUSED_BLOCK_DEFINITIONS": "unused_block_definitions",
+    "COLOR_NOT_BYLAYER": "color_not_bylayer",
+    "LINETYPE_NOT_BYLAYER": "linetype_not_bylayer",
+    "DUPLICATE_ENTITIES": "duplicate_entities",
+    "XREF_NOT_LOADED": "xref_not_loaded",
+    "XREF_DETECTED": "xref_detected",
+    "TITLE_BLOCK_MISSING": "title_block_missing",
+    "VIEWPORT_NO_SCALE": "viewport_no_scale",
+    "VIEWPORT_SCALE_UNUSUAL": "viewport_scale_unusual",
+    "MTEXT_OVERFLOW": "mtext_overflow",
+    "EXTERNAL_FONT": "external_font",
+    "LINEWEIGHT_NOT_BYLAYER": "lineweight_not_bylayer",
+    "PLOT_STYLE_NOT_SET": "plot_style_not_set",
+    "PLOT_STYLE_INVALID": "plot_style_invalid",
+}
+
+
+def _tr_or_none(key: str) -> str | None:
+    text = _(key)
+    return None if text == key else text
+
+
+def _rule_explain(rule: str) -> dict[str, str]:
+    slug = _RULE_EXPLAIN_SLUG.get(rule)
+    if not slug:
+        return {}
+
+    out: dict[str, str] = {}
+    what = _tr_or_none(f"report_explain_{slug}_what")
+    why = _tr_or_none(f"report_explain_{slug}_why")
+    fix = _tr_or_none(f"report_explain_{slug}_fix")
+    if what:
+        out["what"] = what
+    if why:
+        out["why"] = why
+    if fix:
+        out["fix"] = fix
+    return out
+
+def _sev_priority(sev: str) -> str:
+    if sev == "ERROR":
+        return _('report_priority_high')
+    if sev == "WARNING":
+        return _('report_priority_medium')
+    return _('report_priority_low')
+
+
+def _sev_impact(sev: str) -> str:
+    if sev == "ERROR":
+        return _('report_impact_error')
+    if sev == "WARNING":
+        return _('report_impact_warning')
+    if sev == "INFO":
+        return _('report_impact_info')
+    return _('report_impact_unclassified')
+
+
+def _probable_cause(rule: str, entity_type: str, details: str) -> str:
+    """Infere causa provável da ocorrência com base na regra e evidências."""
+    d = (details or "").lower()
+    et = (entity_type or "").upper()
+
+    if rule == "XREF_NOT_LOADED":
+        if any(token in d for token in ("não encontrado", "nao encontrado", "caminho", "not found", "path")):
+            return _('report_cause_xref_path_missing')
+        return _('report_cause_xref_invalid_link')
+
+    if rule == "DUPLICATE_ENTITIES":
+        if "handle" in d:
+            return _('report_cause_duplicate_overlap_copy')
+        return _('report_cause_duplicate_coincident_geometry')
+
+    if rule in {"COLOR_NOT_BYLAYER", "LINETYPE_NOT_BYLAYER", "LINEWEIGHT_NOT_BYLAYER"}:
+        return _('report_cause_graphic_property_not_bylayer')
+
+    if rule == "TEXT_HEIGHT_OUT_OF_RANGE":
+        return _('report_cause_text_height_out_of_range')
+
+    if rule == "MTEXT_OVERFLOW":
+        return _('report_cause_mtext_overflow')
+
+    if rule in {"VIEWPORT_NO_SCALE", "VIEWPORT_SCALE_UNUSUAL"}:
+        return _('report_cause_viewport_scale_config')
+
+    if rule == "EXTERNAL_FONT":
+        return _('report_cause_external_font')
+
+    if rule == "TITLE_BLOCK_MISSING":
+        return _('report_cause_title_block_missing')
+
+    if rule == "REQUIRED_LAYER_MISSING":
+        return _('report_cause_required_layer_missing')
+
+    if rule == "LAYER_NAMING_CONVENTION":
+        return _('report_cause_layer_naming_convention')
+
+    if rule == "EMPTY_LAYERS":
+        return _('report_cause_empty_layers')
+
+    if rule == "UNUSED_BLOCK_DEFINITIONS":
+        return _('report_cause_unused_block_definitions')
+
+    if rule == "ENTITIES_ON_LAYER_0":
+        return _('report_cause_entities_on_layer0')
+
+    if rule in {"ENTITIES_ON_FROZEN_LAYER", "ENTITIES_ON_OFF_LAYER"}:
+        return _('report_cause_entities_visibility_layer')
+
+    if rule in {"PLOT_STYLE_NOT_SET", "PLOT_STYLE_INVALID"}:
+        return _('report_cause_plot_style_header')
+
+    if et:
+        return _('report_cause_entity_out_of_standard', entity=et)
+    return _('report_cause_not_inferred')
+
+
+def _confidence(issue) -> str:
+    """Estima confiança diagnóstica baseada em evidências disponíveis."""
+    score = 0
+    if issue.handle:
+        score += 1
+    if issue.layer:
+        score += 1
+    if getattr(issue, "location", ""):
+        score += 1
+    if issue.details:
+        score += 1
+    if score >= 4:
+        return _('report_confidence_high')
+    if score >= 2:
+        return _('report_confidence_medium')
+    return _('report_confidence_low')
+
+
+def _evidence(issue) -> str:
+    """Consolida evidências técnicas relevantes para auditoria."""
+    ev = []
+    if issue.rule:
+        ev.append(f"{_('report_evidence_rule')}: {issue.rule}")
+    if issue.entity_type:
+        ev.append(f"{_('report_evidence_entity')}: {issue.entity_type}")
+    if issue.layer:
+        ev.append(f"{_('report_evidence_layer')}: {issue.layer}")
+    if issue.handle:
+        ev.append(f"{_('report_evidence_handle')}: {issue.handle}")
+    if getattr(issue, "location", ""):
+        ev.append(f"{_('report_evidence_location')}: {issue.location}")
+    if issue.details:
+        ev.append(f"{_('report_evidence_detail')}: {issue.details}")
+    return " | ".join(ev) if ev else _('report_evidence_none')
+
+
+def _build_issues_view(result: Dict) -> list[dict]:
+    """Enriquece issues com explicações técnicas para relatório mais preciso."""
+    out: list[dict] = []
+    for issue in result.get("issues", []):
+        expl = _rule_explain(issue.rule)
+        where_parts = []
+        if issue.layer:
+            where_parts.append(f"{_('report_where_layer')}: {issue.layer}")
+        if getattr(issue, "location", ""):
+            where_parts.append(f"{_('report_where_location')}: {issue.location}")
+        if issue.handle:
+            where_parts.append(f"{_('report_where_handle')}: {issue.handle}")
+        if issue.entity_type:
+            where_parts.append(f"{_('report_where_type')}: {issue.entity_type}")
+
+        where = " | ".join(where_parts) if where_parts else _('report_where_not_identified')
+        sev = issue.severity.value
+        probable = _probable_cause(issue.rule, issue.entity_type, issue.details)
+        conf = _confidence(issue)
+        evidence = _evidence(issue)
+
+        out.append({
+            "severity": sev,
+            "rule": issue.rule,
+            "message": issue.message,
+            "layer": issue.layer or "",
+            "location": getattr(issue, "location", "") or "",
+            "handle": issue.handle or "",
+            "entity_type": issue.entity_type or "",
+            "details": issue.details or "",
+            "what": expl.get("what", _('report_what_unclassified')),
+            "why": expl.get("why", _('report_why_review_context')),
+            "fix": expl.get("fix", _('report_fix_apply_standard')),
+            "where": where,
+            "probable_cause": probable,
+            "evidence": evidence,
+            "confidence": conf,
+            "priority": _sev_priority(sev),
+            "impact": _sev_impact(sev),
+        })
+    return out
+
+
+def _build_audit_summary(result: Dict, issues_view: list[dict]) -> dict:
+    """Cria visão executiva de auditoria com plano de ação priorizado."""
+    total = len(issues_view)
+    by_sev = Counter(i["severity"] for i in issues_view)
+    by_priority = Counter(i["priority"] for i in issues_view)
+
+    # Score simples e transparente (0-100)
+    score = max(0, 100 - (result.get("errors", 0) * 10) - (result.get("warnings", 0) * 4) - (result.get("infos", 0) * 1))
+
+    if result.get("errors", 0) > 0:
+        recommendation = _('report_recommendation_reject_fix')
+    elif result.get("warnings", 0) > 0:
+        recommendation = _('report_recommendation_approve_remarks')
+    else:
+        recommendation = _('report_recommendation_approve')
+
+    # Top regras e layers para priorização
+    top_rules = []
+    for rule, n in Counter(i["rule"] for i in issues_view).most_common(8):
+        sev_counts = Counter(i["severity"] for i in issues_view if i["rule"] == rule)
+        top_rules.append({
+            "rule": rule,
+            "count": n,
+            "errors": sev_counts.get("ERROR", 0),
+            "warnings": sev_counts.get("WARNING", 0),
+            "infos": sev_counts.get("INFO", 0),
+        })
+
+    top_layers = []
+    no_layer = _('report_no_layer')
+    layers = [i["layer"] if i["layer"] else no_layer for i in issues_view]
+    for layer, n in Counter(layers).most_common(8):
+        sev_counts = Counter(i["severity"] for i in issues_view if (i["layer"] or no_layer) == layer)
+        top_layers.append({
+            "layer": layer,
+            "count": n,
+            "errors": sev_counts.get("ERROR", 0),
+            "warnings": sev_counts.get("WARNING", 0),
+            "infos": sev_counts.get("INFO", 0),
+        })
+
+    pr_high = _('report_priority_high')
+    pr_medium = _('report_priority_medium')
+    pr_low = _('report_priority_low')
+    cf_high = _('report_confidence_high')
+    cf_medium = _('report_confidence_medium')
+    cf_low = _('report_confidence_low')
+    pr_rank = {pr_high: 3, pr_medium: 2, pr_low: 1}
+    cf_rank = {cf_high: 3, cf_medium: 2, cf_low: 1}
+    action_plan = sorted(
+        issues_view,
+        key=lambda i: (
+            -pr_rank.get(i.get("priority", pr_medium), 2),
+            -cf_rank.get(i.get("confidence", cf_medium), 2),
+            i.get("rule", ""),
+        ),
+    )[:20]
+
+    return {
+        "score": score,
+        "recommendation": recommendation,
+        "total": total,
+        "errors": by_sev.get("ERROR", 0),
+        "warnings": by_sev.get("WARNING", 0),
+        "infos": by_sev.get("INFO", 0),
+        "priority_high": by_priority.get(pr_high, 0),
+        "priority_medium": by_priority.get(pr_medium, 0),
+        "priority_low": by_priority.get(pr_low, 0),
+        "top_rules": top_rules,
+        "top_layers": top_layers,
+        "action_plan": action_plan,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -28,38 +311,38 @@ def print_console_report(result: Dict) -> None:
     console = Console()
 
     color = "green" if result["passed"] else "red"
-    status = "✅  APROVADO" if result["passed"] else "❌  REPROVADO"
+    status = _('result_passed') if result["passed"] else _('result_failed')
 
     console.print()
     console.print(
         Panel(
             f"[bold {color}]{status}[/bold {color}]\n\n"
-            f"Arquivo : [cyan]{result['file']}[/cyan]\n"
-            f"[red]Erros   : {result['errors']}[/red]   "
-            f"[yellow]Avisos : {result['warnings']}[/yellow]   "
+            f"{_('col_file')} : [cyan]{result['file']}[/cyan]\n"
+            f"[red]{_('col_errors')}   : {result['errors']}[/red]   "
+            f"[yellow]{_('col_warnings')} : {result['warnings']}[/yellow]   "
             f"[blue]Infos  : {result['infos']}[/blue]",
-            title="[bold white]DWG Quality Checker[/bold white]",
+            title=f"[bold white]{_('app_name')}[/bold white]",
             border_style=color,
             padding=(1, 2),
         )
     )
 
     if not result["issues"]:
-        console.print("[bold green]\n  Nenhum problema encontrado! 🎉[/bold green]\n")
+        console.print(f"[bold green]\n  {_('rpt_no_issues')}[/bold green]\n")
         return
 
     table = Table(
-        title="Problemas Encontrados",
+        title=_('pdf_issues_title'),
         box=box.ROUNDED,
         show_lines=True,
         expand=True,
     )
-    table.add_column("Severidade", style="bold", width=12, justify="center")
-    table.add_column("Regra", style="cyan", width=34)
-    table.add_column("Mensagem")
+    table.add_column(_('rpt_col_severity'), style="bold", width=12, justify="center")
+    table.add_column(_('rpt_col_rule'), style="cyan", width=34)
+    table.add_column(_('rpt_col_message'))
     table.add_column("Layer", style="dim", width=18)
-    table.add_column("Localização", style="dim", width=22)
-    table.add_column("Detalhes", style="dim", width=30)
+    table.add_column(_('rpt_col_location'), style="dim", width=22)
+    table.add_column(_('rpt_col_details'), style="dim", width=30)
 
     _colors = {
         Severity.ERROR: "red",
@@ -102,10 +385,16 @@ def generate_html_report(result: Dict, output_path: str | None = None) -> str:
     env.filters["tojson"] = lambda v: json.dumps(v, ensure_ascii=False)
     template = env.get_template("report.html")
 
+    issues_view = _build_issues_view(result)
+    audit = _build_audit_summary(result, issues_view)
+
     html = template.render(
         result=result,
+        issues_view=issues_view,
+        audit=audit,
         Severity=Severity,
         timestamp=datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+        lang=get_active_lang(),
         tr=get_tr_dict(),
     )
 
@@ -309,7 +598,7 @@ def generate_pdf_report(result: Dict, output_path: str | None = None) -> str:
     story.append(HRFlowable(width="100%", thickness=0.5, color=C_MUTED))
     story.append(Spacer(1, 2 * mm))
     story.append(Paragraph(
-        f"DWG Quality Checker v2.5.0  ·  Vantara Tech  ·  Luiz Q. Melo  ·  {ts}",
+        f"DWG Quality Checker v{APP_VERSION}  ·  Vantara Tech  ·  Luiz Q. Melo  ·  {ts}",
         sCenter,
     ))
 
@@ -747,7 +1036,7 @@ def generate_batch_dashboard(results: list, output_path: str | None = None) -> s
 
 {rules_section}
 
-<footer>DWG Quality Checker v2.5.0  ·  Vantara Tech  ·  Luiz Q. Melo</footer>
+<footer>DWG Quality Checker v{APP_VERSION}  ·  Vantara Tech  ·  Luiz Q. Melo</footer>
 </body>
 </html>"""
 
