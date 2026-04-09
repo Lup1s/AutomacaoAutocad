@@ -132,6 +132,11 @@ build\build.bat
 - Abrir [build/installer.iss](build/installer.iss) no Inno Setup.
 - Compilar (F9).
 
+### Opções de limpeza no instalador
+
+- **Instalação limpa**: no assistente de instalação, marque a tarefa **Instalação limpa** para remover vestígios de versões antigas antes da cópia da nova versão.
+- **Desinstalação limpa**: ao desinstalar, o assistente pergunta se deseja limpeza completa de vestígios e dados residuais do aplicativo.
+
 ---
 
 ## Estrutura do projeto
@@ -189,7 +194,7 @@ rules:
 
 ## Versão
 
-Versão atual: **2.6.0**
+Versão atual: **2.6.1**
 
 ---
 

@@ -7,10 +7,13 @@ import json
 import logging
 import os
 import platform
+import re
 import subprocess
 import sys
 import threading
 import traceback
+import urllib.error
+import urllib.parse
 import urllib.request
 import webbrowser
 from datetime import datetime
@@ -52,6 +55,48 @@ else:
 
 HISTORY_FILE = _BASE_DIR / "history.json"
 _LOG_FILE    = _BASE_DIR / "dwg_checker.log"
+_AUTH_CONFIG_FILE = _BASE_DIR / "auth_config.json"
+
+
+def _to_bool(value, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _load_auth_settings() -> tuple[str, str, bool]:
+    """Carrega credenciais Supabase de auth_config.json (com fallback para env)."""
+    cfg: dict = {}
+    if _AUTH_CONFIG_FILE.exists():
+        try:
+            with open(_AUTH_CONFIG_FILE, "r", encoding="utf-8") as f:
+                loaded = json.load(f) or {}
+            if isinstance(loaded, dict):
+                cfg = loaded
+        except Exception as exc:
+            logging.warning("Auth config: falha ao ler %s: %s", _AUTH_CONFIG_FILE, exc)
+
+    supabase_url = str(cfg.get("SUPABASE_URL", "")).strip().rstrip("/")
+    supabase_anon_key = str(cfg.get("SUPABASE_ANON_KEY", "")).strip()
+    require_sub = _to_bool(cfg.get("SUPABASE_REQUIRE_SUBSCRIPTION", False), default=False)
+
+    # Ambiente pode sobrescrever config local (CI/CD, suporte, debug)
+    env_url = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
+    env_key = os.getenv("SUPABASE_ANON_KEY", "").strip()
+    if env_url:
+        supabase_url = env_url
+    if env_key:
+        supabase_anon_key = env_key
+    if os.getenv("SUPABASE_REQUIRE_SUBSCRIPTION") is not None:
+        require_sub = _to_bool(os.getenv("SUPABASE_REQUIRE_SUBSCRIPTION"), default=require_sub)
+
+    return supabase_url, supabase_anon_key, require_sub
+
+
+_SUPABASE_URL, _SUPABASE_ANON_KEY, _SUPABASE_REQUIRE_SUBSCRIPTION = _load_auth_settings()
+_SUPABASE_SUBSCRIPTIONS_TABLE = os.getenv("SUPABASE_SUBSCRIPTIONS_TABLE", "subscriptions").strip() or "subscriptions"
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -218,6 +263,711 @@ def _apply_style() -> None:
     s.layout("DWG.Treeview", [("DWG.Treeview.treearea", {"sticky": "nsew"})])
 
 
+def _bring_window_to_front(win: tk.Toplevel, parent: tk.Misc | None = None) -> None:
+    """Garante que janelas secundárias apareçam na frente e com foco."""
+    try:
+        if parent is not None:
+            win.transient(parent)
+    except Exception:
+        pass
+
+    def _raise_focus() -> None:
+        try:
+            win.lift()
+        except Exception:
+            pass
+        try:
+            win.focus_force()
+        except Exception:
+            try:
+                win.focus()
+            except Exception:
+                pass
+        try:
+            win.attributes("-topmost", True)
+            win.after(120, lambda: win.attributes("-topmost", False))
+        except Exception:
+            pass
+
+    win.after(1, _raise_focus)
+
+
+def _set_window_half_parent_centered(win: tk.Toplevel, parent: tk.Misc | None = None) -> None:
+    """Posiciona a janela em 50% do tamanho da janela principal, centralizada."""
+    try:
+        if parent is not None and parent.winfo_exists():
+            parent.update_idletasks()
+            p_w = parent.winfo_width()
+            p_h = parent.winfo_height()
+            p_x = parent.winfo_rootx()
+            p_y = parent.winfo_rooty()
+            if p_w < 200 or p_h < 200:
+                raise RuntimeError("parent geometry not ready")
+        else:
+            raise RuntimeError("parent not available")
+    except Exception:
+        p_w = win.winfo_screenwidth()
+        p_h = win.winfo_screenheight()
+        p_x = 0
+        p_y = 0
+
+    w = max(320, int(p_w * 0.5))
+    h = max(240, int(p_h * 0.5))
+    x = p_x + (p_w - w) // 2
+    y = p_y + (p_h - h) // 2
+    win.geometry(f"{w}x{h}+{x}+{y}")
+
+
+def _show_blocking_notice(title: str, message: str, level: str = "error") -> None:
+    """Exibe aviso modal com visual mais moderno para bloqueios de execução."""
+    level = (level or "error").lower().strip()
+    if level == "warning":
+        icon, icon_color, bar_color = "⚠️", C["warning"], C["warn_bg"]
+    elif level == "info":
+        icon, icon_color, bar_color = "ℹ️", C["info"], C["info_bg"]
+    else:
+        icon, icon_color, bar_color = "⛔", C["error"], C["err_bg"]
+
+    try:
+        win = ctk.CTk()
+        win.title(title)
+        win.resizable(False, False)
+        win.configure(fg_color=C["bg"])
+
+        w, h = 560, 260
+        sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+        x, y = max(0, (sw - w) // 2), max(0, (sh - h) // 2)
+        win.geometry(f"{w}x{h}+{x}+{y}")
+
+        card = ctk.CTkFrame(win, fg_color=C["surface"], corner_radius=12)
+        card.pack(fill="both", expand=True, padx=14, pady=14)
+        card.grid_columnconfigure(1, weight=1)
+
+        stripe = ctk.CTkFrame(card, fg_color=bar_color, corner_radius=8, width=8)
+        stripe.grid(row=0, column=0, rowspan=3, sticky="ns", padx=(10, 12), pady=10)
+
+        ctk.CTkLabel(
+            card,
+            text=icon,
+            font=ctk.CTkFont(size=26),
+            text_color=icon_color,
+        ).grid(row=0, column=1, sticky="w", padx=(0, 8), pady=(16, 6))
+
+        ctk.CTkLabel(
+            card,
+            text=title,
+            font=ctk.CTkFont(size=18, weight="bold"),
+            text_color=C["text"],
+        ).grid(row=1, column=1, sticky="w", pady=(0, 4))
+
+        ctk.CTkLabel(
+            card,
+            text=message,
+            font=ctk.CTkFont(size=12),
+            text_color=C["muted"],
+            justify="left",
+            anchor="w",
+            wraplength=460,
+        ).grid(row=2, column=1, sticky="nw", pady=(0, 16))
+
+        ctk.CTkButton(
+            card,
+            text="OK",
+            width=92,
+            height=34,
+            corner_radius=8,
+            command=win.destroy,
+        ).grid(row=3, column=1, sticky="e", padx=(0, 14), pady=(0, 14))
+
+        win.attributes("-topmost", True)
+        win.after(300, lambda: win.attributes("-topmost", False))
+        win.mainloop()
+    except Exception:
+        if level == "warning":
+            messagebox.showwarning(title, message)
+        elif level == "info":
+            messagebox.showinfo(title, message)
+        else:
+            messagebox.showerror(title, message)
+
+
+# ── Auth helpers ─────────────────────────────────────────────────────────────
+
+def _normalize_login(value: str) -> str:
+    return value.strip().lower()
+
+
+def _is_valid_email(value: str) -> bool:
+    return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value.strip()))
+
+
+class SupabaseAuthManager:
+    backend_name = "Supabase"
+
+    def __init__(self, url: str, anon_key: str) -> None:
+        self.url = url.rstrip("/")
+        self.anon_key = anon_key
+
+    def has_users(self) -> bool:
+        return True
+
+    def _request_json(
+        self,
+        method: str,
+        path_with_query: str,
+        payload: dict | None = None,
+        access_token: str | None = None,
+    ) -> tuple[int, dict | list | None, str | None]:
+        url = f"{self.url}{path_with_query}"
+        headers = {
+            "apikey": self.anon_key,
+            "Content-Type": "application/json",
+        }
+        if access_token:
+            headers["Authorization"] = f"Bearer {access_token}"
+        else:
+            headers["Authorization"] = f"Bearer {self.anon_key}"
+
+        data = None if payload is None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=data, headers=headers, method=method.upper())
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                raw = resp.read().decode("utf-8")
+                obj = json.loads(raw) if raw else None
+                return int(resp.status), obj, None
+        except urllib.error.HTTPError as exc:
+            try:
+                raw = exc.read().decode("utf-8")
+                obj = json.loads(raw) if raw else {}
+                msg = obj.get("msg") or obj.get("message") or obj.get("error_description") or str(obj)
+            except Exception:
+                msg = str(exc)
+            return int(getattr(exc, "code", 500)), None, msg
+        except Exception as exc:
+            return 0, None, str(exc)
+
+    def register(self, name: str, email: str, password: str) -> tuple[bool, str]:
+        name = name.strip()
+        email_n = _normalize_login(email)
+        if len(name) < 2:
+            return False, "Nome deve ter pelo menos 2 caracteres."
+        if not _is_valid_email(email_n):
+            return False, "E-mail inválido."
+        if len(password) < 8:
+            return False, "A senha deve ter no mínimo 8 caracteres."
+
+        status, _, err = self._request_json(
+            "POST",
+            "/auth/v1/signup",
+            {
+                "email": email_n,
+                "password": password,
+                "data": {"full_name": name},
+            },
+        )
+        if status in (200, 201):
+            return True, "Conta criada com sucesso."
+        return False, err or "Falha ao criar conta no Supabase."
+
+    def _has_active_subscription(self, user_id: str, access_token: str) -> tuple[bool, str | None]:
+        if not _SUPABASE_REQUIRE_SUBSCRIPTION:
+            return True, None
+
+        uid = urllib.parse.quote(user_id, safe="")
+        q = (
+            f"/rest/v1/{_SUPABASE_SUBSCRIPTIONS_TABLE}"
+            f"?select=id,status,current_period_end"
+            f"&user_id=eq.{uid}"
+            f"&status=in.(active,trialing)"
+            f"&order=current_period_end.desc"
+            f"&limit=1"
+        )
+        status, obj, err = self._request_json("GET", q, access_token=access_token)
+        if status != 200:
+            return False, err or "Falha ao validar assinatura."
+        if isinstance(obj, list) and obj:
+            return True, None
+        return False, "Assinatura inativa. Entre em contato para ativar seu acesso."
+
+    def authenticate(self, email: str, password: str) -> tuple[dict | None, str | None]:
+        email_n = _normalize_login(email)
+        status, obj, err = self._request_json(
+            "POST",
+            "/auth/v1/token?grant_type=password",
+            {"email": email_n, "password": password},
+        )
+        if status != 200 or not isinstance(obj, dict):
+            return None, err or "Credenciais inválidas."
+
+        access_token = str(obj.get("access_token", ""))
+        user_obj = obj.get("user") if isinstance(obj.get("user"), dict) else {}
+        user_id = str(user_obj.get("id", ""))
+
+        if not user_id and access_token:
+            st_u, obj_u, err_u = self._request_json("GET", "/auth/v1/user", access_token=access_token)
+            if st_u == 200 and isinstance(obj_u, dict):
+                user_obj = obj_u
+                user_id = str(obj_u.get("id", ""))
+            elif err_u:
+                return None, err_u
+
+        if not user_id:
+            return None, "Usuário não identificado no Supabase."
+
+        ok_sub, sub_err = self._has_active_subscription(user_id, access_token)
+        if not ok_sub:
+            return None, sub_err
+
+        md = user_obj.get("user_metadata") if isinstance(user_obj.get("user_metadata"), dict) else {}
+        return {
+            "id": user_id,
+            "name": md.get("full_name") or email_n.split("@")[0],
+            "email": user_obj.get("email", email_n),
+            "access_token": access_token,
+        }, None
+
+    def validate_access_token(
+        self,
+        access_token: str,
+        expected_user_id: str | None = None,
+    ) -> tuple[dict | None, str | None]:
+        """Valida token ativo e assinatura diretamente no Supabase."""
+        token = str(access_token or "").strip()
+        if not token:
+            return None, "Token ausente."
+
+        st_u, obj_u, err_u = self._request_json("GET", "/auth/v1/user", access_token=token)
+        if st_u != 200 or not isinstance(obj_u, dict):
+            return None, err_u or "Sessão inválida ou expirada."
+
+        user_id = str(obj_u.get("id", "")).strip()
+        if not user_id:
+            return None, "Usuário inválido na sessão."
+        if expected_user_id and str(expected_user_id).strip() and user_id != str(expected_user_id).strip():
+            return None, "Sessão não corresponde ao usuário autenticado."
+
+        ok_sub, sub_err = self._has_active_subscription(user_id, token)
+        if not ok_sub:
+            return None, sub_err or "Assinatura inválida."
+
+        md = obj_u.get("user_metadata") if isinstance(obj_u.get("user_metadata"), dict) else {}
+        return {
+            "id": user_id,
+            "name": md.get("full_name") or str(obj_u.get("email", "")).split("@")[0],
+            "email": obj_u.get("email", ""),
+            "access_token": token,
+        }, None
+
+
+class PreviewAuthManager:
+    """Backend de preview para desenhar a tela de login sem backend configurado."""
+
+    backend_name = "Preview"
+
+    def has_users(self) -> bool:
+        return True
+
+    def register(self, name: str, email: str, password: str) -> tuple[bool, str]:
+        return False, "Modo preview: cadastro desativado."
+
+    def authenticate(self, email: str, password: str) -> tuple[dict | None, str | None]:
+        return None, "Modo preview: login desativado."
+
+
+class LoginWindow(ctk.CTk):
+    def __init__(self, auth) -> None:
+        super().__init__()
+        self.auth = auth
+        self.authenticated_user: dict | None = None
+
+        self.title("DWG Quality Checker · Login")
+        self.geometry("620x800")
+        self.minsize(500, 640)
+        self.configure(fg_color=C["bg"])
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+
+        # Centraliza na tela
+        self.after(1, lambda: self._center_on_screen(620, 800))
+
+        self._mode = ctk.StringVar(value="login")
+        self._show_pwd_login = False
+        self._show_pwd_register = False
+        self._show_pwd_register2 = False
+
+        self._build()
+        self._set_mode("register" if not self.auth.has_users() else "login")
+        self.after(10, self._adapt_window_size)
+        self.bind("<Configure>", self._on_resize)
+
+    def _center_on_screen(self, width: int | None = None, height: int | None = None) -> None:
+        """Centraliza a janela na tela, opcionalmente com tamanho informado."""
+        try:
+            self.update_idletasks()
+            w = int(width if width is not None else self.winfo_width())
+            h = int(height if height is not None else self.winfo_height())
+            sw = self.winfo_screenwidth()
+            sh = self.winfo_screenheight()
+            x = max(0, (sw - w) // 2)
+            y = max(0, (sh - h) // 2)
+            self.geometry(f"{w}x{h}+{x}+{y}")
+        except Exception:
+            pass
+
+    def _build(self) -> None:
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        self._sheet = ctk.CTkFrame(self, fg_color=C["surface"], corner_radius=18)
+        self._sheet.grid(row=0, column=0, padx=18, pady=18, sticky="nsew")
+        self._sheet.grid_columnconfigure(0, weight=1)
+        self._sheet.grid_rowconfigure(4, weight=1)
+
+        head = ctk.CTkFrame(self._sheet, fg_color="transparent")
+        head.grid(row=0, column=0, padx=28, pady=(24, 10), sticky="ew")
+        head.grid_columnconfigure(0, weight=1)
+
+        self._title_lbl = ctk.CTkLabel(
+            head,
+            text="🏗️  DWG Quality Checker",
+            font=ctk.CTkFont(size=30, weight="bold"),
+            text_color=C["text"],
+        )
+        self._title_lbl.grid(row=0, column=0, sticky="w")
+
+        self._subtitle_lbl = ctk.CTkLabel(
+            head,
+            text="Acesso seguro ao sistema. Faça login ou crie sua conta.",
+            font=ctk.CTkFont(size=12),
+            text_color=C["muted"],
+            justify="left",
+            wraplength=520,
+        )
+        self._subtitle_lbl.grid(row=1, column=0, sticky="w", pady=(4, 10))
+
+        self._mode_segment = ctk.CTkSegmentedButton(
+            self._sheet,
+            values=["Entrar", "Criar conta"],
+            command=lambda v: self._set_mode("login" if v == "Entrar" else "register"),
+            height=36,
+            fg_color=C["surface2"],
+            selected_color=C["accent"],
+            selected_hover_color="#2f6cd1",
+            unselected_hover_color=C["border"],
+        )
+        self._mode_segment.grid(row=1, column=0, padx=28, pady=(0, 12), sticky="ew")
+
+        self._msg_box = ctk.CTkFrame(
+            self._sheet,
+            fg_color=C["surface2"],
+            corner_radius=10,
+            border_width=1,
+            border_color=C["border"],
+        )
+        self._msg_box.grid(row=2, column=0, padx=28, pady=(0, 10), sticky="ew")
+        self._msg_box.grid_columnconfigure(1, weight=1)
+        self._msg_icon = ctk.CTkLabel(
+            self._msg_box,
+            text="ℹ️",
+            font=ctk.CTkFont(size=14),
+            text_color=C["info"],
+        )
+        self._msg_icon.grid(row=0, column=0, padx=(10, 8), pady=8, sticky="nw")
+        self._msg_lbl = ctk.CTkLabel(
+            self._msg_box,
+            text="",
+            text_color=C["muted"],
+            font=ctk.CTkFont(size=11, weight="bold"),
+            anchor="w",
+            justify="left",
+            wraplength=500,
+        )
+        self._msg_lbl.grid(row=0, column=1, padx=(0, 10), pady=8, sticky="ew")
+
+        self._login_frame = ctk.CTkFrame(self._sheet, fg_color="transparent")
+        self._login_frame.grid(row=3, column=0, padx=28, pady=(0, 12), sticky="nsew")
+        self._login_frame.grid_columnconfigure(0, weight=1)
+
+        self._login_email = ctk.StringVar()
+        self._login_pwd = ctk.StringVar()
+        ctk.CTkLabel(
+            self._login_frame, text="E-mail", text_color=C["muted"], font=ctk.CTkFont(size=11)
+        ).grid(row=0, column=0, sticky="w")
+        e_login = ctk.CTkEntry(self._login_frame, textvariable=self._login_email, height=38, corner_radius=10)
+        e_login.grid(row=1, column=0, sticky="ew", pady=(4, 12))
+
+        ctk.CTkLabel(
+            self._login_frame, text="Senha", text_color=C["muted"], font=ctk.CTkFont(size=11)
+        ).grid(row=2, column=0, sticky="w")
+        pw_row = ctk.CTkFrame(self._login_frame, fg_color="transparent")
+        pw_row.grid(row=3, column=0, sticky="ew", pady=(4, 14))
+        pw_row.grid_columnconfigure(0, weight=1)
+        self._login_pwd_entry = ctk.CTkEntry(pw_row, textvariable=self._login_pwd, show="•", height=38, corner_radius=10)
+        self._login_pwd_entry.grid(row=0, column=0, sticky="ew")
+        ctk.CTkButton(
+            pw_row,
+            text="👁",
+            width=40,
+            height=38,
+            corner_radius=10,
+            fg_color=C["surface2"],
+            hover_color=C["border"],
+            command=self._toggle_login_password,
+        ).grid(row=0, column=1, padx=(8, 0))
+
+        ctk.CTkButton(
+            self._login_frame,
+            text="Entrar",
+            height=38,
+            corner_radius=10,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            command=self._do_login,
+        ).grid(row=4, column=0, sticky="ew")
+        e_login.bind("<Return>", lambda _: self._do_login())
+        self._login_pwd_entry.bind("<Return>", lambda _: self._do_login())
+
+        self._register_frame = ctk.CTkFrame(self._sheet, fg_color="transparent")
+        self._register_frame.grid(row=3, column=0, padx=28, pady=(0, 12), sticky="nsew")
+        self._register_frame.grid_columnconfigure(0, weight=1)
+
+        self._reg_name = ctk.StringVar()
+        self._reg_email = ctk.StringVar()
+        self._reg_pwd = ctk.StringVar()
+        self._reg_pwd2 = ctk.StringVar()
+
+        ctk.CTkLabel(
+            self._register_frame, text="Nome", text_color=C["muted"], font=ctk.CTkFont(size=11)
+        ).grid(row=0, column=0, sticky="w")
+        e_name = ctk.CTkEntry(self._register_frame, textvariable=self._reg_name, height=36, corner_radius=10)
+        e_name.grid(row=1, column=0, sticky="ew", pady=(4, 10))
+
+        ctk.CTkLabel(
+            self._register_frame, text="E-mail", text_color=C["muted"], font=ctk.CTkFont(size=11)
+        ).grid(row=2, column=0, sticky="w")
+        e_email = ctk.CTkEntry(self._register_frame, textvariable=self._reg_email, height=36, corner_radius=10)
+        e_email.grid(row=3, column=0, sticky="ew", pady=(4, 10))
+
+        ctk.CTkLabel(
+            self._register_frame, text="Senha", text_color=C["muted"], font=ctk.CTkFont(size=11)
+        ).grid(row=4, column=0, sticky="w")
+        reg_pw_row = ctk.CTkFrame(self._register_frame, fg_color="transparent")
+        reg_pw_row.grid(row=5, column=0, sticky="ew", pady=(4, 10))
+        reg_pw_row.grid_columnconfigure(0, weight=1)
+        self._reg_pwd_entry = ctk.CTkEntry(reg_pw_row, textvariable=self._reg_pwd, show="•", height=36, corner_radius=10)
+        self._reg_pwd_entry.grid(row=0, column=0, sticky="ew")
+        ctk.CTkButton(
+            reg_pw_row,
+            text="👁",
+            width=40,
+            height=36,
+            corner_radius=10,
+            fg_color=C["surface2"],
+            hover_color=C["border"],
+            command=self._toggle_register_password,
+        ).grid(row=0, column=1, padx=(8, 0))
+
+        ctk.CTkLabel(
+            self._register_frame, text="Confirmar senha", text_color=C["muted"], font=ctk.CTkFont(size=11)
+        ).grid(row=6, column=0, sticky="w")
+        reg_pw2_row = ctk.CTkFrame(self._register_frame, fg_color="transparent")
+        reg_pw2_row.grid(row=7, column=0, sticky="ew", pady=(4, 12))
+        reg_pw2_row.grid_columnconfigure(0, weight=1)
+        self._reg_pwd2_entry = ctk.CTkEntry(reg_pw2_row, textvariable=self._reg_pwd2, show="•", height=36, corner_radius=10)
+        self._reg_pwd2_entry.grid(row=0, column=0, sticky="ew")
+        ctk.CTkButton(
+            reg_pw2_row,
+            text="👁",
+            width=40,
+            height=36,
+            corner_radius=10,
+            fg_color=C["surface2"],
+            hover_color=C["border"],
+            command=self._toggle_register_password2,
+        ).grid(row=0, column=1, padx=(8, 0))
+
+        ctk.CTkButton(
+            self._register_frame,
+            text="Criar conta",
+            height=38,
+            corner_radius=10,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            command=self._do_register,
+        ).grid(row=8, column=0, sticky="ew")
+
+        for w in (e_name, e_email, self._reg_pwd_entry, self._reg_pwd2_entry):
+            w.bind("<Return>", lambda _: self._do_register())
+
+        foot = ctk.CTkFrame(self._sheet, fg_color="transparent")
+        foot.grid(row=5, column=0, padx=28, pady=(4, 20), sticky="ew")
+        ctk.CTkLabel(
+            foot,
+            text="Sem autenticação válida, sem acesso ao sistema.",
+            text_color=C["border"],
+            font=ctk.CTkFont(size=10),
+        ).pack(anchor="w")
+
+    def _on_resize(self, event) -> None:
+        if event.widget is not self:
+            return
+        # Responsivo: ajusta tipografia/wrap sem quebrar layout
+        narrow = event.width < 700
+        self._title_lbl.configure(font=ctk.CTkFont(size=24 if narrow else 28, weight="bold"))
+        wrap = max(360, event.width - 140)
+        self._subtitle_lbl.configure(wraplength=wrap)
+        self._msg_lbl.configure(wraplength=max(320, wrap - 26))
+
+    def _adapt_window_size(self) -> None:
+        """Ajusta altura da janela para o conteúdo do modo atual (Entrar/Criar conta)."""
+        try:
+            self.update_idletasks()
+            cur_w = max(self.winfo_width(), 500)
+            req_h = self._sheet.winfo_reqheight() + 38
+            target_h = max(620, min(900, req_h))
+            if abs(self.winfo_height() - target_h) > 6:
+                self._center_on_screen(cur_w, target_h)
+        except Exception:
+            pass
+
+    def _toggle_login_password(self) -> None:
+        self._show_pwd_login = not self._show_pwd_login
+        self._login_pwd_entry.configure(show="" if self._show_pwd_login else "•")
+
+    def _toggle_register_password(self) -> None:
+        self._show_pwd_register = not self._show_pwd_register
+        self._reg_pwd_entry.configure(show="" if self._show_pwd_register else "•")
+
+    def _toggle_register_password2(self) -> None:
+        self._show_pwd_register2 = not self._show_pwd_register2
+        self._reg_pwd2_entry.configure(show="" if self._show_pwd_register2 else "•")
+
+    def _set_mode(self, mode: str, keep_message: bool = False) -> None:
+        self._mode.set(mode)
+        self._mode_segment.set("Entrar" if mode == "login" else "Criar conta")
+        if mode == "login":
+            self._register_frame.grid_remove()
+            self._login_frame.grid()
+            if not keep_message:
+                self._show_msg("Entre com sua conta para continuar.", level="info")
+        else:
+            self._login_frame.grid_remove()
+            self._register_frame.grid()
+            if not keep_message:
+                self._show_msg("Preencha os campos para criar sua conta.", level="info")
+        self.after(1, self._adapt_window_size)
+
+    def _show_msg(self, text: str, level: str = "info") -> None:
+        level = level.lower().strip()
+        if level == "success":
+            box_fg, box_border, icon, icon_color, text_color = "#0f2f1f", "#1f6a46", "✅", C["success"], "#b9f5d0"
+        elif level == "error":
+            box_fg, box_border, icon, icon_color, text_color = "#3a1616", "#7c2d2d", "❌", C["error"], "#ffd0d0"
+        elif level == "warning":
+            box_fg, box_border, icon, icon_color, text_color = "#3a2c10", "#7a5a1c", "⚠️", C["warning"], "#ffe8b3"
+        else:
+            box_fg, box_border, icon, icon_color, text_color = "#12243d", "#224a7a", "ℹ️", C["info"], "#cddfff"
+
+        self._msg_box.configure(fg_color=box_fg, border_color=box_border)
+        self._msg_icon.configure(text=icon, text_color=icon_color)
+        self._msg_lbl.configure(text=text, text_color=text_color)
+
+    def _do_register(self) -> None:
+        name = self._reg_name.get().strip()
+        email = self._reg_email.get().strip()
+        pwd = self._reg_pwd.get()
+        pwd2 = self._reg_pwd2.get()
+
+        if not name or not email or not pwd or not pwd2:
+            self._show_msg("Preencha todos os campos do cadastro para continuar.", level="warning")
+            return
+
+        if pwd != pwd2:
+            self._show_msg("As senhas não coincidem. Revise e tente novamente.", level="error")
+            return
+
+        ok, msg = self.auth.register(name, email, pwd)
+        if not ok:
+            self._show_msg(f"Não foi possível concluir o cadastro.\n{msg}", level="error")
+            return
+
+        self._set_mode("login", keep_message=True)
+        self._show_msg(
+            "Cadastro realizado com sucesso!\n"
+            "Agora confirme seu e-mail para liberar o login.",
+            level="success",
+        )
+        self._login_email.set(email)
+        self._login_pwd.set("")
+
+    def _do_login(self) -> None:
+        email = self._login_email.get().strip()
+        pwd = self._login_pwd.get()
+        if not email or not pwd:
+            self._show_msg("Informe e-mail e senha para entrar.", level="warning")
+            return
+        user, err = self.auth.authenticate(email, pwd)
+        if not user:
+            err_txt = str(err or "Credenciais inválidas.").strip()
+            err_low = err_txt.lower()
+            if "confirm" in err_low and "email" in err_low:
+                self._show_msg("Confirme seu e-mail para concluir o cadastro e depois faça login.", level="warning")
+            else:
+                self._show_msg(err_txt, level="error")
+            return
+        self.authenticated_user = user
+        self.destroy()
+
+
+def _shake_window(win: tk.Toplevel, intensity: int = 12, interval_ms: int = 24) -> None:
+    """Aplica um efeito de "tremer" curto na janela informada."""
+    try:
+        if not win.winfo_exists():
+            return
+    except Exception:
+        return
+
+    if getattr(win, "_dwg_shaking", False):
+        return
+
+    try:
+        win.update_idletasks()
+        x0, y0 = win.winfo_x(), win.winfo_y()
+    except Exception:
+        return
+
+    offsets = [
+        intensity,
+        -intensity,
+        int(intensity * 0.7),
+        -int(intensity * 0.7),
+        int(intensity * 0.4),
+        -int(intensity * 0.4),
+        0,
+    ]
+    setattr(win, "_dwg_shaking", True)
+
+    def _step(idx: int = 0) -> None:
+        try:
+            if not win.winfo_exists():
+                return
+        except Exception:
+            return
+
+        if idx >= len(offsets):
+            try:
+                win.geometry(f"+{x0}+{y0}")
+            except Exception:
+                pass
+            setattr(win, "_dwg_shaking", False)
+            return
+
+        try:
+            win.geometry(f"+{x0 + offsets[idx]}+{y0}")
+        except Exception:
+            pass
+        win.after(interval_ms, lambda: _step(idx + 1))
+
+    _step()
+
+
 # ── History helpers ───────────────────────────────────────────────────────────
 
 def _load_history() -> list:
@@ -260,13 +1010,12 @@ class HistoryWindow(ctk.CTkToplevel):
     def __init__(self, parent) -> None:
         super().__init__(parent)
         self.title(_('history_title'))
-        self.geometry("760x420")
         self.configure(fg_color=C["bg"])
         self.resizable(True, True)
+        _set_window_half_parent_centered(self, parent)
         self._html_map: dict[str, str | None] = {}
         self._build()
-        self.lift()
-        self.focus()
+        _bring_window_to_front(self, parent)
 
     def _build(self) -> None:
         self.grid_columnconfigure(0, weight=1)
@@ -364,15 +1113,28 @@ class HistoryWindow(ctk.CTkToplevel):
             messagebox.showinfo(_("chart_title"), _("chart_no_data"), parent=self)
             return
 
+        existing = getattr(self, "_trend_win", None)
+        if existing is not None:
+            try:
+                if existing.winfo_exists():
+                    existing.deiconify()
+                    _bring_window_to_front(existing, self)
+                    _shake_window(existing)
+                    return
+            except Exception:
+                pass
+
         data = list(reversed(history[-20:]))  # mais antigo → mais recente
 
         win = ctk.CTkToplevel(self)
+        self._trend_win = win
         win.title(_("chart_title"))
         win.geometry("560x340")
         win.resizable(False, False)
         win.configure(fg_color=C["bg"])
         win.grab_set()
-        win.lift()
+        _bring_window_to_front(win, self)
+        win.bind("<Destroy>", lambda e: setattr(self, "_trend_win", None) if e.widget is win else None, add="+")
 
         # ── Canvas ───────────────────────────────────────────────────────────
         W, H   = 540, 310
@@ -452,9 +1214,9 @@ class BatchWindow(ctk.CTkToplevel):
     def __init__(self, parent) -> None:
         super().__init__(parent)
         self.title(_('batch_title'))
-        self.geometry("760x540")
         self.configure(fg_color=C["bg"])
         self.resizable(True, True)
+        _set_window_half_parent_centered(self, parent)
         self._files: list[str] = []
         self._html_map: dict[str, str | None] = {}
         self._batch_results: list = []
@@ -462,8 +1224,7 @@ class BatchWindow(ctk.CTkToplevel):
         self._stop_flag = False
         _apply_style()
         self._build()
-        self.lift()
-        self.focus()
+        _bring_window_to_front(self, parent)
 
     def _build(self) -> None:
         self.grid_columnconfigure(0, weight=1)
@@ -752,15 +1513,14 @@ class ConfigEditorWindow(ctk.CTkToplevel):
     def __init__(self, parent) -> None:
         super().__init__(parent)
         self.title(f"⚙️  {_('config_title')}")
-        self.geometry("600x680")
-        self.minsize(560, 620)
+        self.minsize(420, 300)
         self.configure(fg_color=C["bg"])
+        _set_window_half_parent_centered(self, parent)
         self.grab_set()
         self._cfg = self._load()
         self._profiles: dict = self._load_profiles()
         self._build()
-        self.lift()
-        self.focus()
+        _bring_window_to_front(self, parent)
 
     # ── Load / Save ───────────────────────────────────────────────────────────
 
@@ -844,12 +1604,26 @@ class ConfigEditorWindow(ctk.CTkToplevel):
 
     def _save_profile(self) -> None:
         """Salva a configuração atual como um novo perfil."""
+        existing = getattr(self, "_save_profile_win", None)
+        if existing is not None:
+            try:
+                if existing.winfo_exists():
+                    existing.deiconify()
+                    _bring_window_to_front(existing, self)
+                    _shake_window(existing)
+                    return
+            except Exception:
+                pass
+
         win = ctk.CTkToplevel(self)
+        self._save_profile_win = win
         win.title(_('config_profile_save'))
         win.geometry("340x150")
         win.resizable(False, False)
         win.configure(fg_color=C["bg"])
         win.grab_set()
+        _bring_window_to_front(win, self)
+        win.bind("<Destroy>", lambda e: setattr(self, "_save_profile_win", None) if e.widget is win else None, add="+")
         ctk.CTkLabel(win, text=_('config_profile_name_label'),
                      font=ctk.CTkFont(size=11), text_color=C["text"]
         ).pack(pady=(20, 4))
@@ -1311,9 +2085,9 @@ class WatchFolderWindow(ctk.CTkToplevel):
     def __init__(self, parent) -> None:
         super().__init__(parent)
         self.title(_('watch_title'))
-        self.geometry("720x500")
         self.configure(fg_color=C["bg"])
         self.resizable(True, True)
+        _set_window_half_parent_centered(self, parent)
         self._watching   = False
         self._watch_thread: threading.Thread | None = None
         self._stop_evt   = threading.Event()
@@ -1321,8 +2095,7 @@ class WatchFolderWindow(ctk.CTkToplevel):
         self._html_map:   dict[str, str | None] = {}
         _apply_style()
         self._build()
-        self.lift()
-        self.focus()
+        _bring_window_to_front(self, parent)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _build(self) -> None:
@@ -1574,14 +2347,13 @@ class CompareWindow(ctk.CTkToplevel):
     def __init__(self, parent) -> None:
         super().__init__(parent)
         self.title(_('compare_title'))
-        self.geometry("860x580")
         self.configure(fg_color=C["bg"])
         self.resizable(True, True)
+        _set_window_half_parent_centered(self, parent)
         self._html_map: dict[str, str | None] = {}
         _apply_style()
         self._build()
-        self.lift()
-        self.focus()
+        _bring_window_to_front(self, parent)
 
     def _build(self) -> None:
         self.grid_columnconfigure(0, weight=1)
@@ -1893,9 +2665,40 @@ def _check_for_update(current_version: str, callback) -> None:
 class App(ctk.CTk):
     _PROFILES_FILE = _BASE_DIR / "config_profiles.json"
     _BASE_PROFILE_LABEL = "config.yaml (base)"
+    _SESSION_REVALIDATE_MS = 5 * 60 * 1000
 
-    def __init__(self) -> None:
+    def __init__(self, authenticated_user: dict | None = None) -> None:
         super().__init__()
+        self._authenticated_user = authenticated_user
+        if not self._authenticated_user:
+            try:
+                messagebox.showerror(
+                    "Acesso negado",
+                    "Login obrigatório para utilizar o programa.",
+                    parent=self,
+                )
+            except Exception:
+                pass
+            self.destroy()
+            raise PermissionError("Login obrigatório para iniciar o App")
+
+        self._session_token = str(self._authenticated_user.get("access_token", "")).strip()
+        self._session_user_id = str(self._authenticated_user.get("id", "")).strip()
+        if not self._session_token or not self._session_user_id:
+            try:
+                messagebox.showerror(
+                    "Acesso negado",
+                    "Sessão inválida. Faça login novamente.",
+                    parent=self,
+                )
+            except Exception:
+                pass
+            self.destroy()
+            raise PermissionError("Sessão inválida")
+
+        if not self._validate_session_or_close(show_message=True):
+            raise PermissionError("Sessão não validada no servidor")
+
         # Inicializa suporte a drag & drop antes de qualquer widget
         if _DND_OK:
             try:
@@ -1907,6 +2710,7 @@ class App(ctk.CTk):
         self.geometry("1020x680")
         self.minsize(800, 560)
         self.configure(fg_color=C["bg"])
+        self.after(0, self._start_maximized)
 
         self._html_path:  str | None = None
         self._csv_path:   str | None = None
@@ -1915,6 +2719,7 @@ class App(ctk.CTk):
         self._all_issues: list       = []
         self.auto_open_var = ctk.BooleanVar(value=True)
         self._profiles_runtime: dict = self._load_runtime_profiles()
+        self._open_windows: dict[str, tk.Toplevel] = {}
 
         _apply_style()
 
@@ -1929,6 +2734,68 @@ class App(ctk.CTk):
         self._setup_dnd()
         # Verifica atualização em background (silencioso se offline)
         _check_for_update(VERSION, lambda info: self.after(0, self._on_update_result, info))
+        self.after(self._SESSION_REVALIDATE_MS, self._periodic_session_check)
+
+    def _validate_session_or_close(self, show_message: bool = False) -> bool:
+        """Valida sessão ativa e assinatura no Supabase."""
+        try:
+            if not _SUPABASE_URL or not _SUPABASE_ANON_KEY:
+                if show_message:
+                    messagebox.showerror(
+                        "Configuração inválida",
+                        "SUPABASE_URL/SUPABASE_ANON_KEY ausentes.\n"
+                        "Preencha auth_config.json na pasta do programa.",
+                        parent=self,
+                    )
+                self.destroy()
+                return False
+
+            mgr = SupabaseAuthManager(_SUPABASE_URL, _SUPABASE_ANON_KEY)
+            user, err = mgr.validate_access_token(
+                self._session_token,
+                expected_user_id=self._session_user_id,
+            )
+            if not user:
+                if show_message:
+                    messagebox.showerror(
+                        "Sessão inválida",
+                        err or "Não foi possível validar sua sessão.",
+                        parent=self,
+                    )
+                self.destroy()
+                return False
+
+            self._authenticated_user = user
+            return True
+        except Exception as exc:
+            logging.error("Sessão: falha na validação: %s", exc)
+            if show_message:
+                try:
+                    messagebox.showerror(
+                        "Sessão inválida",
+                        "Falha ao validar sessão no servidor.",
+                        parent=self,
+                    )
+                except Exception:
+                    pass
+            self.destroy()
+            return False
+
+    def _periodic_session_check(self) -> None:
+        if not self.winfo_exists():
+            return
+        if self._validate_session_or_close(show_message=True):
+            self.after(self._SESSION_REVALIDATE_MS, self._periodic_session_check)
+
+    def _start_maximized(self) -> None:
+        """Inicia a janela principal sempre em tela cheia (maximizada)."""
+        try:
+            self.state("zoomed")
+        except Exception:
+            try:
+                self.attributes("-zoomed", True)
+            except Exception:
+                pass
 
     # ── Header ────────────────────────────────────────────────────────────────
 
@@ -2309,15 +3176,50 @@ class App(ctk.CTk):
                      font=ctk.CTkFont(size=9), text_color=C["border"]
         ).grid(row=0, column=2, padx=12)
 
+        user_email = str(getattr(self, "_authenticated_user", {}).get("email", "")).strip()
+        if user_email:
+            ctk.CTkLabel(
+                ftr,
+                text=f"🔐 {user_email}",
+                font=ctk.CTkFont(size=9),
+                text_color=C["muted"],
+            ).grid(row=0, column=3, padx=(0, 12))
+
     # ── About ─────────────────────────────────────────────────────────────────
 
-    def _open_about(self) -> None:
+    def _open_singleton_window(self, key: str, factory) -> tk.Toplevel:
+        """Abre uma janela única por chave; se já existir, foca e aplica shake."""
+        win = self._open_windows.get(key)
+        if win is not None:
+            try:
+                if win.winfo_exists():
+                    win.deiconify()
+                    _bring_window_to_front(win, self)
+                    _shake_window(win)
+                    return win
+            except Exception:
+                pass
+
+        win = factory()
+        self._open_windows[key] = win
+
+        def _cleanup(event=None) -> None:
+            if event is not None and event.widget is not win:
+                return
+            if self._open_windows.get(key) is win:
+                self._open_windows.pop(key, None)
+
+        win.bind("<Destroy>", _cleanup, add="+")
+        return win
+
+    def _build_about_window(self) -> tk.Toplevel:
         win = ctk.CTkToplevel(self)
         win.title(f"{_('about_title')} · {_('app_name')}")
-        win.geometry("420x340")
         win.resizable(False, False)
         win.configure(fg_color=C["bg"])
+        _set_window_half_parent_centered(win, self)
         win.grab_set()
+        _bring_window_to_front(win, self)
 
         # ícone
         ctk.CTkLabel(win, text="🏗️", font=ctk.CTkFont(size=48)
@@ -2357,8 +3259,13 @@ class App(ctk.CTk):
             command=win.destroy,
         ).pack(pady=(16, 0))
 
+        return win
+
+    def _open_about(self) -> None:
+        self._open_singleton_window("about", self._build_about_window)
+
     def _open_config(self) -> None:
-        ConfigEditorWindow(self)
+        self._open_singleton_window("config", lambda: ConfigEditorWindow(self))
 
     def _load_runtime_profiles(self) -> dict:
         try:
@@ -2426,17 +3333,25 @@ class App(ctk.CTk):
         Converte .DWG → .DXF usando ODA File Converter.
         Retorna o caminho do .DXF gerado, ou None em caso de erro.
         """
-        import subprocess, tempfile
+        import shutil
+        import subprocess
+        import tempfile
         oda = self._find_oda()
         if not oda:
             return None
 
         dwg = Path(dwg_path)
-        out_dir = Path(tempfile.mkdtemp(prefix="dwg_checker_"))
+        in_dir = Path(tempfile.mkdtemp(prefix="dwg_checker_in_"))
+        out_dir = Path(tempfile.mkdtemp(prefix="dwg_checker_out_"))
         try:
+            # Isola apenas o arquivo selecionado para evitar conversão em lote
+            # de todos os DWG da pasta de origem.
+            isolated_dwg = in_dir / dwg.name
+            shutil.copy2(dwg, isolated_dwg)
+
             # ODAFileConverter <InputDir> <OutputDir> <version> <type> <recurse> <audit>
             result = subprocess.run(
-                [oda, str(dwg.parent), str(out_dir), "ACAD2018", "DXF", "0", "1"],
+                [oda, str(in_dir), str(out_dir), "ACAD2018", "DXF", "0", "1"],
                 capture_output=True, text=True, timeout=120,
             )
             # Se o processo falhou, capture stderr/stdout para diagnóstico
@@ -2815,13 +3730,13 @@ class App(ctk.CTk):
         self.bind("<Control-D>", lambda e: self._open_compare())
 
     def _open_batch(self) -> None:
-        BatchWindow(self)
+        self._open_singleton_window("batch", lambda: BatchWindow(self))
 
     def _open_watch(self) -> None:
-        WatchFolderWindow(self)
+        self._open_singleton_window("watch", lambda: WatchFolderWindow(self))
 
     def _open_compare(self) -> None:
-        CompareWindow(self)
+        self._open_singleton_window("compare", lambda: CompareWindow(self))
 
     def _on_update_result(self, info: dict | None) -> None:
         """Chamado após a verificação de auto-update (thread-safe via after())."""
@@ -2913,7 +3828,7 @@ class App(ctk.CTk):
                 btn.configure(state=state)
 
     def _open_history(self) -> None:
-        HistoryWindow(self)
+        self._open_singleton_window("history", lambda: HistoryWindow(self))
 
     def _apply_ux_mode(self) -> None:
         mode = getattr(self, "_ux_mode_var", None)
@@ -2961,13 +3876,14 @@ class App(ctk.CTk):
         }
         return di
 
-    def _open_diagnostics(self) -> None:
+    def _build_diagnostics_window(self) -> tk.Toplevel:
         win = ctk.CTkToplevel(self)
         win.title(_('diag_title'))
-        win.geometry("760x500")
-        win.minsize(680, 420)
+        win.minsize(420, 300)
         win.configure(fg_color=C["bg"])
+        _set_window_half_parent_centered(win, self)
         win.grab_set()
+        _bring_window_to_front(win, self)
 
         root = ctk.CTkFrame(win, fg_color=C["surface"], corner_radius=10)
         root.pack(fill="both", expand=True, padx=12, pady=12)
@@ -3038,16 +3954,66 @@ class App(ctk.CTk):
                       fg_color=C["surface2"], hover_color=C["border"], command=win.destroy).pack(side="right")
 
         _render()
+        return win
+
+    def _open_diagnostics(self) -> None:
+        self._open_singleton_window("diagnostics", self._build_diagnostics_window)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    dev_mode = os.getenv("DWGQC_DEV_MODE", "0").strip().lower() in ("1", "true", "yes", "on")
+    frozen = bool(getattr(sys, "frozen", False))
+
+    login_only = False
+    if "--login-only" in sys.argv:
+        # Modo de preview apenas para desenvolvimento
+        if frozen or not dev_mode:
+            _show_blocking_notice(
+                "Parâmetro bloqueado",
+                "--login-only é permitido apenas em ambiente de desenvolvimento.",
+                level="warning",
+            )
+            sys.exit(1)
+        sys.argv.remove("--login-only")
+        login_only = True
+
     if "--cli" in sys.argv:
+        # CLI pode contornar UI; bloqueado em distribuição
+        if frozen or not dev_mode:
+            _show_blocking_notice(
+                "Modo bloqueado",
+                "Execução CLI desativada por segurança.",
+                level="warning",
+            )
+            sys.exit(1)
         sys.argv.remove("--cli")
         from checker.cli import main as _cli_main
         _cli_main()
     else:
         set_lang(get_lang())
-        app = App()
-        app.mainloop()
+        if login_only and (not _SUPABASE_URL or not _SUPABASE_ANON_KEY):
+            auth_backend = PreviewAuthManager()
+        else:
+            if not _SUPABASE_URL or not _SUPABASE_ANON_KEY:
+                _show_blocking_notice(
+                    "Configuração obrigatória",
+                    "SUPABASE_URL e SUPABASE_ANON_KEY são obrigatórios.\n"
+                    "Preencha auth_config.json na pasta do programa.\n"
+                    "A autenticação local está desativada.",
+                    level="error",
+                )
+                sys.exit(1)
+            auth_backend = SupabaseAuthManager(_SUPABASE_URL, _SUPABASE_ANON_KEY)
+
+        login = LoginWindow(auth_backend)
+        login.mainloop()
+        if login_only:
+            sys.exit(0)
+        if getattr(login, "authenticated_user", None):
+            try:
+                app = App(authenticated_user=login.authenticated_user)
+                app.mainloop()
+            except PermissionError:
+                sys.exit(1)
