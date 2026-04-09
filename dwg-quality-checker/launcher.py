@@ -34,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from checker.core import DXFChecker, merge_profiles_into_config
 from checker.i18n import _, get_lang, set_lang
+from checker.recovery import recover_dxf, recover_folder
 from checker.report import (
     generate_batch_dashboard,
     generate_csv_report,
@@ -2918,7 +2919,7 @@ class App(ctk.CTk):
         # ── Row 1: action ─────────────────────────────────────────────────────
         ar = ctk.CTkFrame(card, fg_color="transparent")
         ar.grid(row=2, column=0, columnspan=7, padx=14, pady=(0, 12), sticky="ew")
-        ar.grid_columnconfigure(3, weight=1)
+        ar.grid_columnconfigure(5, weight=1)
 
         self.run_btn = ctk.CTkButton(
             ar, text=_('btn_verify'),
@@ -2928,14 +2929,38 @@ class App(ctk.CTk):
         )
         self.run_btn.grid(row=0, column=0, padx=(0, 12))
 
+        self._recover_btn = ctk.CTkButton(
+            ar, text=_('btn_recover'),
+            width=125, height=32, corner_radius=8,
+            fg_color=C["surface2"], hover_color=C["border"],
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=self._run_recovery,
+        )
+        self._recover_btn.grid(row=0, column=1, padx=(0, 12))
+
+        self._recover_mode_var = ctk.StringVar(value=_('recover_mode_balanced'))
+        self._recover_mode_menu = ctk.CTkOptionMenu(
+            ar,
+            variable=self._recover_mode_var,
+            values=[_('recover_mode_safe'), _('recover_mode_balanced'), _('recover_mode_aggressive')],
+            width=145,
+            height=26,
+            corner_radius=6,
+            fg_color=C["surface2"],
+            button_color=C["border"],
+            button_hover_color=C["accent"],
+            font=ctk.CTkFont(size=10),
+        )
+        self._recover_mode_menu.grid(row=0, column=2, padx=(0, 12), sticky="w")
+
         self.strict_var = ctk.BooleanVar(value=False)
         self._strict_chk = ctk.CTkCheckBox(ar, text=_('main_strict_label'), variable=self.strict_var,
                            font=ctk.CTkFont(size=11), text_color=C["muted"], width=68)
-        self._strict_chk.grid(row=0, column=1, padx=(0, 20))
+        self._strict_chk.grid(row=0, column=3, padx=(0, 20))
 
         ctk.CTkLabel(ar, text=_("config_profile_label"),
                      font=ctk.CTkFont(size=10, weight="bold"), text_color=C["muted"]
-        ).grid(row=0, column=2, padx=(0, 6), sticky="e")
+        ).grid(row=0, column=4, padx=(0, 6), sticky="e")
         profile_values = [self._BASE_PROFILE_LABEL, *sorted(self._profiles_runtime.keys())]
         self._run_profile_var = ctk.StringVar(value=self._BASE_PROFILE_LABEL)
         self._run_profile_menu = ctk.CTkOptionMenu(
@@ -2950,7 +2975,7 @@ class App(ctk.CTk):
             button_hover_color=C["accent"],
             font=ctk.CTkFont(size=10),
         )
-        self._run_profile_menu.grid(row=0, column=3, padx=(0, 10), sticky="w")
+        self._run_profile_menu.grid(row=0, column=5, padx=(0, 10), sticky="w")
 
         self._run_profiles_multi_var = ctk.StringVar(value="")
         ctk.CTkEntry(
@@ -2963,20 +2988,20 @@ class App(ctk.CTk):
             border_color=C["border"],
             font=ctk.CTkFont(size=10),
             placeholder_text="NBR_5410, NBR_9050",
-        ).grid(row=0, column=4, padx=(0, 10), sticky="w")
+        ).grid(row=0, column=6, padx=(0, 10), sticky="w")
 
         self._status_icon = ctk.CTkLabel(ar, text="⏳", font=ctk.CTkFont(size=15))
-        self._status_icon.grid(row=0, column=5, padx=(0, 5))
+        self._status_icon.grid(row=0, column=7, padx=(0, 5))
 
         self._status_lbl = ctk.CTkLabel(
             ar, text=_('main_status_waiting'),
             font=ctk.CTkFont(size=11), text_color=C["muted"],
         )
-        self._status_lbl.grid(row=0, column=6, sticky="w")
+        self._status_lbl.grid(row=0, column=8, sticky="w")
 
         # Badges
         bg = ctk.CTkFrame(ar, fg_color="transparent")
-        bg.grid(row=0, column=7, padx=(0, 10))
+        bg.grid(row=0, column=9, padx=(0, 10))
         self._err_b  = self._badge(bg, "❌ 0", C["error"],   C["err_bg"],  0)
         self._warn_b = self._badge(bg, "⚠️ 0", C["warning"], C["warn_bg"], 1)
         self._info_b = self._badge(bg, "ℹ️ 0", C["info"],    C["info_bg"], 2)
@@ -2987,7 +3012,7 @@ class App(ctk.CTk):
             font=ctk.CTkFont(size=10, weight="bold"),
             command=self._open_html, state="disabled",
         )
-        self._html_btn.grid(row=0, column=8, padx=(0, 4))
+        self._html_btn.grid(row=0, column=10, padx=(0, 4))
 
         self._csv_btn = ctk.CTkButton(
             ar, text=_('btn_csv'), width=64, height=26, corner_radius=8,
@@ -2995,7 +3020,7 @@ class App(ctk.CTk):
             fg_color=C["surface2"], hover_color=C["border"],
             command=self._open_csv, state="disabled",
         )
-        self._csv_btn.grid(row=0, column=9)
+        self._csv_btn.grid(row=0, column=11)
 
         self._pdf_btn = ctk.CTkButton(
             ar, text=_('btn_pdf'), width=64, height=26, corner_radius=8,
@@ -3003,7 +3028,7 @@ class App(ctk.CTk):
             fg_color=C["surface2"], hover_color=C["border"],
             command=self._open_pdf, state="disabled",
         )
-        self._pdf_btn.grid(row=0, column=10, padx=(4, 0))
+        self._pdf_btn.grid(row=0, column=12, padx=(4, 0))
 
         self._xlsx_btn = ctk.CTkButton(
             ar, text=_('btn_xlsx'), width=72, height=26, corner_radius=8,
@@ -3011,7 +3036,7 @@ class App(ctk.CTk):
             fg_color=C["surface2"], hover_color=C["border"],
             command=self._open_xlsx, state="disabled",
         )
-        self._xlsx_btn.grid(row=0, column=11, padx=(4, 0))
+        self._xlsx_btn.grid(row=0, column=13, padx=(4, 0))
 
         self._ann_btn = ctk.CTkButton(
             ar, text=_('btn_annotate'), width=95, height=26, corner_radius=8,
@@ -3019,7 +3044,7 @@ class App(ctk.CTk):
             fg_color=C["surface2"], hover_color=C["border"],
             command=self._annotate_dxf, state="disabled",
         )
-        self._ann_btn.grid(row=0, column=12, padx=(4, 0))
+        self._ann_btn.grid(row=0, column=14, padx=(4, 0))
 
         self._out_dir_btn = ctk.CTkButton(
             ar, text=_('btn_output_folder'), width=82, height=26, corner_radius=8,
@@ -3027,13 +3052,13 @@ class App(ctk.CTk):
             fg_color=C["surface2"], hover_color=C["border"],
             command=self._open_output_folder, state="disabled",
         )
-        self._out_dir_btn.grid(row=0, column=13, padx=(4, 0))
+        self._out_dir_btn.grid(row=0, column=15, padx=(4, 0))
 
         ctk.CTkCheckBox(
             ar, text=_('chk_auto_html'), variable=self.auto_open_var,
             font=ctk.CTkFont(size=10), text_color=C["muted"],
             width=90, checkbox_height=14, checkbox_width=14,
-        ).grid(row=0, column=14, padx=(6, 0))
+        ).grid(row=0, column=16, padx=(6, 0))
 
         mode_row = ctk.CTkFrame(card, fg_color="transparent")
         mode_row.grid(row=3, column=0, columnspan=7, padx=14, pady=(0, 10), sticky="ew")
@@ -3457,6 +3482,152 @@ class App(ctk.CTk):
         profile_names = self._selected_profile_names()
         threading.Thread(target=self._worker, args=(fp, profile_names), daemon=True).start()
 
+    def _run_recovery(self) -> None:
+        fp = self.file_var.get().strip()
+        if not fp or not Path(fp).exists():
+            messagebox.showwarning(_('dlg_no_file_title'), _('dlg_no_file_msg'))
+            return
+
+        ext = Path(fp).suffix.lower()
+        if ext not in (".dxf", ".dwg"):
+            messagebox.showwarning(_('dlg_invalid_fmt_title'), _('dlg_invalid_fmt_msg'))
+            return
+
+        self._set_busy_state(True)
+        self.run_btn.configure(state="disabled")
+        self._recover_btn.configure(state="disabled", text=_('btn_recovering'))
+        self._status_icon.configure(text="🛠️")
+        self._status_lbl.configure(
+            text=_('main_status_recovering_file', file=Path(fp).name),
+            text_color=C["muted"],
+        )
+        self._progress.start()
+        self._footer_lbl.configure(text=_('main_footer_recovering_file', file=Path(fp).name))
+        threading.Thread(target=self._recovery_worker, args=(fp, self._recovery_mode_value()), daemon=True).start()
+
+    def _recovery_mode_value(self) -> str:
+        current = self._recover_mode_var.get()
+        mapping = {
+            _('recover_mode_safe'): "safe",
+            _('recover_mode_balanced'): "balanced",
+            _('recover_mode_aggressive'): "aggressive",
+        }
+        return mapping.get(current, "balanced")
+
+    def _recovery_worker(self, fp: str, mode: str = "balanced") -> None:
+        try:
+            work_fp = fp
+            if Path(fp).suffix.lower() == ".dwg":
+                dxf_fp = self._convert_dwg_to_dxf(fp)
+                if not dxf_fp:
+                    msg = _("dwg_convert_failed_msg")
+                    err = getattr(self, "_last_dwg_error", None)
+                    if err:
+                        msg += _('dwg_convert_details', err=str(err))
+                    self.after(0, self._on_error, msg)
+                    return
+                work_fp = dxf_fp
+
+            out_fp = str(Path(work_fp).with_name(Path(work_fp).stem + "_recovered.dxf"))
+            info = recover_dxf(work_fp, out_fp, mode=mode, preview_only=False)
+            self.after(0, self._on_recovery_done, info)
+        except Exception as exc:
+            tb = traceback.format_exc()
+            logging.error("Recuperação: erro ao processar '%s':\n%s", fp, tb)
+            self.after(0, self._on_error, str(exc), tb)
+
+    def _run_recovery_batch(self) -> None:
+        folder = filedialog.askdirectory(title=_('recover_batch_select_folder'))
+        if not folder:
+            return
+        self._set_busy_state(True)
+        self.run_btn.configure(state="disabled")
+        self._recover_btn.configure(state="disabled", text=_('btn_recovering'))
+        self._status_icon.configure(text="🧰")
+        self._status_lbl.configure(text=_('recover_batch_running'), text_color=C["muted"])
+        self._progress.start()
+        self._footer_lbl.configure(text=_('recover_batch_running'))
+        mode = self._recovery_mode_value()
+        threading.Thread(target=self._recovery_batch_worker, args=(folder, mode), daemon=True).start()
+
+    def _recovery_batch_worker(self, folder: str, mode: str) -> None:
+        try:
+            summary = recover_folder(folder, recursive=True, mode=mode, include_dwg=False)
+            self.after(0, self._on_recovery_batch_done, summary)
+        except Exception as exc:
+            tb = traceback.format_exc()
+            logging.error("Recuperação em lote: erro em '%s':\n%s", folder, tb)
+            self.after(0, self._on_error, str(exc), tb)
+
+    def _on_recovery_batch_done(self, summary: dict) -> None:
+        self._set_busy_state(False)
+        self.run_btn.configure(state="normal", text=_('btn_verify'))
+        self._recover_btn.configure(state="normal", text=_('btn_recover'))
+        self._progress.stop()
+        self._progress.set(0)
+
+        self._status_icon.configure(text="✅")
+        self._status_lbl.configure(text=_('recover_batch_done_status'), text_color=C["success"])
+
+        total = int(summary.get("total", 0) or 0)
+        ok = int(summary.get("ok", 0) or 0)
+        fail = int(summary.get("fail", 0) or 0)
+        summary_file = str(summary.get("summary_file", "")).strip()
+        folder = str(summary.get("folder", "")).strip()
+
+        messagebox.showinfo(
+            _('recover_batch_done_title'),
+            _('recover_batch_done_msg', total=total, ok=ok, fail=fail, summary=summary_file),
+            parent=self,
+        )
+        try:
+            if folder:
+                os.startfile(str(Path(folder).resolve()))
+        except Exception:
+            pass
+
+    def _on_recovery_done(self, info: dict) -> None:
+        self._set_busy_state(False)
+        self.run_btn.configure(state="normal", text=_('btn_verify'))
+        self._recover_btn.configure(state="normal", text=_('btn_recover'))
+        self._progress.stop()
+        self._progress.set(0)
+
+        self._status_icon.configure(text="✅")
+        self._status_lbl.configure(text=_('recover_done_status'), text_color=C["success"])
+
+        output_path = str(info.get("output", "")).strip()
+        report_path = str(info.get("report", "")).strip()
+        stats = info.get("stats", {}) if isinstance(info, dict) else {}
+        regapps_removed = stats.get("regapps_removed", 0)
+        dgn_removed = stats.get("dgn_linetypes_removed", 0)
+        proxy_count = stats.get("proxy_entities", 0)
+        xref_cycles = stats.get("xref_cycles", 0)
+        xref_missing = stats.get("xref_missing", 0)
+        health_score = info.get("health_score", 0)
+        mode_used = info.get("mode", "balanced")
+
+        messagebox.showinfo(
+            _('recover_done_title'),
+            _('recover_done_msg',
+              output=output_path,
+              report=report_path,
+              regapps=regapps_removed,
+              dgn=dgn_removed,
+              proxy=proxy_count,
+              xref_cycles=xref_cycles,
+              xref_missing=xref_missing,
+              score=health_score,
+              mode=mode_used),
+            parent=self,
+        )
+
+        try:
+            if output_path:
+                os.startfile(str(Path(output_path).resolve().parent))
+        except Exception:
+            pass
+
     def _worker_dwg(self, dwg_fp: str, profile_names: list[str] | None = None) -> None:
         """Worker para .DWG: converte via ODA e depois processa como DXF."""
         self.after(0, self._footer_lbl.configure,
@@ -3513,6 +3684,7 @@ class App(ctk.CTk):
         self._last_result = result
 
         self.run_btn.configure(state="normal", text=_('btn_verify'))
+        self._recover_btn.configure(state="normal", text=_('btn_recover'))
         self._set_busy_state(False)
         self._progress.stop()
         self._progress.set(0)
@@ -3580,6 +3752,7 @@ class App(ctk.CTk):
 
     def _on_error(self, err: str, tb: str = "") -> None:
         self.run_btn.configure(state="normal", text=_('btn_verify'))
+        self._recover_btn.configure(state="normal", text=_('btn_recover'))
         self._set_busy_state(False)
         self._progress.stop()
         self._progress.set(0)
@@ -3718,6 +3891,9 @@ class App(ctk.CTk):
     def _setup_shortcuts(self) -> None:
         """Registra atalhos de teclado globais."""
         self.bind("<F5>",        lambda e: self._run())
+        self.bind("<Control-r>", lambda e: self._run_recovery())
+        self.bind("<Control-R>", lambda e: self._run_recovery())
+        self.bind("<Control-Shift-R>", lambda e: self._run_recovery_batch())
         self.bind("<Control-o>", lambda e: self._browse())
         self.bind("<Control-O>", lambda e: self._browse())
         self.bind("<Control-h>", lambda e: self._open_history())
@@ -3817,6 +3993,8 @@ class App(ctk.CTk):
             getattr(self, "_btn_open", None),
             getattr(self, "_btn_batch", None),
             getattr(self, "_btn_clear", None),
+            getattr(self, "_recover_btn", None),
+            getattr(self, "_recover_mode_menu", None),
             getattr(self, "_btn_history", None),
             getattr(self, "_btn_watch", None),
             getattr(self, "_btn_compare", None),

@@ -52,6 +52,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "btn_open":          "📂  Abrir",
         "btn_folder":        "📁 Pasta",
         "btn_verify":        "🔍  Verificar",
+        "btn_recover":       "🛠️  Recuperar",
+        "btn_recovering":    "⏳  Recuperando...",
+        "recover_mode_safe": "Seguro",
+        "recover_mode_balanced": "Balanceado",
+        "recover_mode_aggressive": "Agressivo",
         "btn_verifying":     "⏳  Verificando...",
         "btn_converting":    "⏳  Convertendo...",
         "btn_clear":         "Limpar",
@@ -214,8 +219,35 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "main_status_waiting": "Aguardando arquivo para iniciar",
         "main_status_file_selected": "Arquivo selecionado: {file}",
         "main_status_verifying_file": "Verificando {file}...",
+        "main_status_recovering_file": "Recuperando {file}...",
         "main_status_verifying_converted": "Verificando {file} (convertido)...",
         "main_status_error_processing": "Erro ao processar",
+        "main_footer_recovering_file": "Recuperando: {file}...",
+        "recover_done_status": "Recuperação concluída",
+        "recover_done_title": "Recuperação finalizada",
+        "recover_done_msg": (
+            "Arquivo recuperado com sucesso.\n\n"
+            "Modo: {mode}\n"
+            "Health Score: {score}/100\n"
+            "Saída: {output}\n"
+            "Relatório: {report}\n\n"
+            "RegApps removidos: {regapps}\n"
+            "DGN LineStyles removidos: {dgn}\n"
+            "Objetos proxy detectados: {proxy}\n"
+            "Ciclos de XREF detectados: {xref_cycles}\n"
+            "XREFs ausentes: {xref_missing}"
+        ),
+        "recover_batch_select_folder": "Selecionar pasta para recuperação em lote",
+        "recover_batch_running": "Recuperação em lote em andamento...",
+        "recover_batch_done_status": "Recuperação em lote concluída",
+        "recover_batch_done_title": "Recuperação em lote finalizada",
+        "recover_batch_done_msg": (
+            "Processo concluído.\n\n"
+            "Total: {total}\n"
+            "Sucesso: {ok}\n"
+            "Falhas: {fail}\n\n"
+            "Resumo: {summary}"
+        ),
         "main_flow_hint": "Fluxo: 1) selecione arquivo DXF/DWG  2) clique em Verificar  3) abra os relatórios",
         "main_ctx_clear_filter": "🗑️   Limpar filtro",
         "main_strict_label": "Strict",
@@ -591,6 +623,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "btn_open":          "📂  Open",
         "btn_folder":        "📁 Folder",
         "btn_verify":        "🔍  Verify",
+        "btn_recover":      "🛠️  Recover",
+        "btn_recovering":   "⏳  Recovering...",
+        "recover_mode_safe": "Safe",
+        "recover_mode_balanced": "Balanced",
+        "recover_mode_aggressive": "Aggressive",
         "btn_verifying":     "⏳  Verifying...",
         "btn_converting":    "⏳  Converting...",
         "btn_clear":         "Clear",
@@ -753,8 +790,35 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "main_status_waiting": "Waiting for file to start",
         "main_status_file_selected": "Selected file: {file}",
         "main_status_verifying_file": "Verifying {file}...",
+        "main_status_recovering_file": "Recovering {file}...",
         "main_status_verifying_converted": "Verifying {file} (converted)...",
         "main_status_error_processing": "Processing error",
+        "main_footer_recovering_file": "Recovering: {file}...",
+        "recover_done_status": "Recovery completed",
+        "recover_done_title": "Recovery completed",
+        "recover_done_msg": (
+            "File recovered successfully.\n\n"
+            "Mode: {mode}\n"
+            "Health Score: {score}/100\n"
+            "Output: {output}\n"
+            "Report: {report}\n\n"
+            "RegApps removed: {regapps}\n"
+            "DGN linetypes removed: {dgn}\n"
+            "Proxy objects detected: {proxy}\n"
+            "XREF cycles detected: {xref_cycles}\n"
+            "Missing XREFs: {xref_missing}"
+        ),
+        "recover_batch_select_folder": "Select folder for batch recovery",
+        "recover_batch_running": "Batch recovery running...",
+        "recover_batch_done_status": "Batch recovery completed",
+        "recover_batch_done_title": "Batch recovery completed",
+        "recover_batch_done_msg": (
+            "Process completed.\n\n"
+            "Total: {total}\n"
+            "Success: {ok}\n"
+            "Failed: {fail}\n\n"
+            "Summary: {summary}"
+        ),
         "main_flow_hint": "Flow: 1) select DXF/DWG file  2) click Verify  3) open reports",
         "main_ctx_clear_filter": "🗑️   Clear filter",
         "main_strict_label": "Strict",
