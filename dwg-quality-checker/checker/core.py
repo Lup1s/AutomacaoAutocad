@@ -19,6 +19,18 @@ import yaml
 from .rules import Issue, Severity, get_all_rules
 
 
+def _sha256_file(path: Path, chunk_size: int = 4 * 1024 * 1024) -> str:
+    """Calcula SHA-256 em streaming para evitar pico de memória."""
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        while True:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def _find_default_config() -> Path:
     """Resolve config.yaml tanto no desenvolvimento quanto no executável."""
     if getattr(sys, 'frozen', False):
@@ -436,7 +448,7 @@ class DXFChecker:
 
         # ── SHA-256 (assinatura do arquivo) ────────────────────────────────
         try:
-            sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+            sha256 = _sha256_file(path)
         except Exception:
             sha256 = ""
 
@@ -496,9 +508,24 @@ class DXFChecker:
                     message=f"Erro interno em '{rule_fn.__name__}': {exc}",
                 ))
 
-        # ── Extrair geometria para o visualizador ──────────────────────────
+        # ── Extrair geometria para o visualizador (adaptativo p/ arquivo grande) ─
         issue_handles = {iss.handle for iss in issues if iss.handle}
-        geo_result    = _extract_geometry(doc, issue_handles=issue_handles)
+        skip_geometry = file_size_mb >= 65 or entity_count >= 250_000
+        if skip_geometry:
+            issues.append(Issue(
+                rule="GEOMETRY_SKIPPED_LARGE_FILE",
+                severity=Severity.INFO,
+                message=(
+                    "Visualização geométrica simplificada para arquivo grande "
+                    f"({file_size_mb:.1f} MB / {entity_count} entidades)."
+                ),
+            ))
+            geo_result = {
+                "shapes": [],
+                "bbox": {"minX": 0, "minY": 0, "maxX": 100, "maxY": 100},
+            }
+        else:
+            geo_result = _extract_geometry(doc, issue_handles=issue_handles)
 
         # ── Aplicar overrides de severidade (config [rules][severity_overrides]) ─
         sev_overrides: dict = self.config.get("rules", {}).get("severity_overrides", {})

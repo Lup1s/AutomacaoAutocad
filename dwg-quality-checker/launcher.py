@@ -2634,8 +2634,8 @@ class CompareWindow(ctk.CTkToplevel):
 # ── Auto-Update checker ───────────────────────────────────────────────────────
 
 _UPDATE_URL = "https://api.github.com/repos/vantaratech/dwg-quality-checker/releases/latest"
-# Para usar: crie um release no GitHub com tag "v2.4.0" e o JSON retornará
-# {"tag_name": "v2.4.0", "html_url": "...", "body": "changelog..."}
+# Para usar: crie um release no GitHub com tag "v3.0.1" e o JSON retornará
+# {"tag_name": "v3.0.1", "html_url": "...", "body": "changelog..."}
 
 
 def _check_for_update(current_version: str, callback) -> None:
@@ -4140,6 +4140,40 @@ class App(ctk.CTk):
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
+def prompt_login_user(allow_preview_without_supabase: bool = False) -> dict | None:
+    """Abre a tela de login e retorna o usuário autenticado (ou None se cancelado)."""
+    set_lang(get_lang())
+
+    if allow_preview_without_supabase and (not _SUPABASE_URL or not _SUPABASE_ANON_KEY):
+        auth_backend = PreviewAuthManager()
+    else:
+        if not _SUPABASE_URL or not _SUPABASE_ANON_KEY:
+            _show_blocking_notice(
+                "Configuração obrigatória",
+                "SUPABASE_URL e SUPABASE_ANON_KEY são obrigatórios.\n"
+                "Preencha auth_config.json na pasta do programa.\n"
+                "A autenticação local está desativada.",
+                level="error",
+            )
+            raise SystemExit(1)
+        auth_backend = SupabaseAuthManager(_SUPABASE_URL, _SUPABASE_ANON_KEY)
+
+    login = LoginWindow(auth_backend)
+    login.mainloop()
+    return getattr(login, "authenticated_user", None)
+
+def start_legacy_desktop(login_only: bool = False) -> None:
+    """Inicializa UI legacy (Tk/CustomTkinter) com autenticação."""
+    user = prompt_login_user(allow_preview_without_supabase=login_only)
+    if login_only:
+        raise SystemExit(0)
+    if user:
+        try:
+            app = App(authenticated_user=user)
+            app.mainloop()
+        except PermissionError:
+            raise SystemExit(1)
+
 if __name__ == "__main__":
     dev_mode = os.getenv("DWGQC_DEV_MODE", "0").strip().lower() in ("1", "true", "yes", "on")
     frozen = bool(getattr(sys, "frozen", False))
@@ -4170,28 +4204,4 @@ if __name__ == "__main__":
         from checker.cli import main as _cli_main
         _cli_main()
     else:
-        set_lang(get_lang())
-        if login_only and (not _SUPABASE_URL or not _SUPABASE_ANON_KEY):
-            auth_backend = PreviewAuthManager()
-        else:
-            if not _SUPABASE_URL or not _SUPABASE_ANON_KEY:
-                _show_blocking_notice(
-                    "Configuração obrigatória",
-                    "SUPABASE_URL e SUPABASE_ANON_KEY são obrigatórios.\n"
-                    "Preencha auth_config.json na pasta do programa.\n"
-                    "A autenticação local está desativada.",
-                    level="error",
-                )
-                sys.exit(1)
-            auth_backend = SupabaseAuthManager(_SUPABASE_URL, _SUPABASE_ANON_KEY)
-
-        login = LoginWindow(auth_backend)
-        login.mainloop()
-        if login_only:
-            sys.exit(0)
-        if getattr(login, "authenticated_user", None):
-            try:
-                app = App(authenticated_user=login.authenticated_user)
-                app.mainloop()
-            except PermissionError:
-                sys.exit(1)
+        start_legacy_desktop(login_only=login_only)

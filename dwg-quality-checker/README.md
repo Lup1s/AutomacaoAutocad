@@ -39,6 +39,31 @@ pip install -r requirements.txt
 python launcher.py
 ```
 
+### GUI híbrida (React embutido + fallback)
+
+```bash
+python launcher_web.py
+```
+
+Política de boot da UI híbrida:
+
+- padrão: `auto` (tenta WebView primeiro e cai para UI legacy se falhar)
+- forçar web: `python launcher_web.py --web`
+- forçar legacy: `python launcher_web.py --legacy`
+- via ambiente: `DWGQC_UI_MODE=auto|web|legacy`
+- fallback controlável por `DWGQC_UI_FALLBACK_LEGACY=1|0`
+
+Também é possível criar `ui_boot.json` na pasta do app:
+
+```json
+{
+  "mode": "auto",
+  "fallback_to_legacy": true
+}
+```
+
+Telemetria local de boot/fallback é registrada em `ui_boot_events.jsonl`.
+
 ### CLI oficial
 
 Opção 1:
@@ -128,6 +153,11 @@ python build/sync_version_metadata.py --check
 build\build.bat
 ```
 
+Observações do build híbrido:
+- o script gera automaticamente `web-ui-prototype/dist` antes do PyInstaller;
+- o executável final (`DWGQualityChecker.exe`) usa bootstrap híbrido (`launcher_web.py`) com fallback para UI legacy;
+- `ui_boot.json` padrão é copiado para o `dist` a partir de `ui_boot.example.json`.
+
 3) Gerar instalador (`dist_installer`):
 - Abrir [build/installer.iss](build/installer.iss) no Inno Setup.
 - Compilar (F9).
@@ -194,7 +224,7 @@ rules:
 
 ## Versão
 
-Versão atual: **2.6.1**
+Versão atual: **3.0.1**
 
 ---
 
